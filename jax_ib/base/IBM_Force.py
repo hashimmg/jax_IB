@@ -7,14 +7,11 @@ def integrate_trapz(integrand,dx,dy):
 
 
 def Integrate_Field_Fluid_Domain(field):
-    
-    
     grid = field.grid
    # offset = field.offset
     dxEUL = grid.step[0]
     dyEUL = grid.step[1]
    # X,Y =grid.mesh(offset)
-    
     return integrate_trapz(field.data,dxEUL,dyEUL)
 
 def IBM_force_GENERAL(field,Xi,particle_center,geom_param,Grid_p,shape_fn,discrete_fn,surface_fn,dx_dt,domega_dt,rotation,dt):
