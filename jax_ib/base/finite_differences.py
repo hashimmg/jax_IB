@@ -95,7 +95,9 @@ def backward_difference(
 
 
 def backward_difference(u, axis=None):
-  """Approximates grads with finite differences in the backward direction."""
+  """
+  First order finite-difference approximation of the backward gradient of `u`
+  """
   if axis is None:
     axis = range(u.grid.ndim)
   if not isinstance(axis, int):
@@ -117,7 +119,9 @@ def forward_difference(
 
 
 def forward_difference(u, axis=None):
-  """Approximates grads with finite differences in the forward direction."""
+  """
+  First order finite-difference approximation of the forward gradient of `u`
+  """
   if axis is None:
     axis = range(u.grid.ndim)
   if not isinstance(axis, int):
@@ -127,9 +131,11 @@ def forward_difference(u, axis=None):
 
 
 def laplacian(u: GridVariable) -> GridArray:
-  """Approximates the Laplacian of `u`."""
-  scales = np.square(1 / np.array(u.grid.step, dtype=u.dtype)) 
-  #scales = jnp.square(1 / jnp.array(u.grid.step, dtype=u.dtype))  #return to np instead of jnp
+  """
+  First-order finite difference approximation of the Laplacian of `u`.
+  """
+  #scales = np.square(1 / np.array(u.grid.step, dtype=u.dtype))
+  scales = jnp.square(1 / jnp.array(u.grid.step, dtype=u.dtype))  #return to np instead of jnp
   result = -2 * u.array * jnp.sum(scales)
   for axis in range(u.grid.ndim):
     result += stencil_sum(u.shift(-1, axis), u.shift(+1, axis)) * scales[axis]

@@ -105,7 +105,7 @@ class Grid1d:
 
 @register_pytree_node_class
 @dataclasses.dataclass
-class particle: 
+class Particle: 
     particle_center: Sequence[Any]
     geometry_param: Sequence[Any]
     displacement_param: Sequence[Any]
@@ -114,15 +114,10 @@ class particle:
     shape: Callable
     Displacement_EQ: Callable
     Rotation_EQ: Callable
-    
-    
 
-    
-    
     def tree_flatten(self):
       """Returns flattening recipe for GridVariable JAX pytree."""
       children = (self.particle_center,self.geometry_param,self.displacement_param,self.rotation_param,)
- 
       aux_data = (self.Grid,self.shape,self.Displacement_EQ,self.Rotation_EQ,)
       return children, aux_data
 
@@ -132,9 +127,8 @@ class particle:
        return cls(*children,*aux_data) 
 
     def generate_grid(self):
-        
         return self.Grid.mesh()
-       
+
     def calc_Rtheta(self):
       return self.shape(self.geometry_param,self.Grid) 
 
@@ -144,7 +138,7 @@ class particle:
 @register_pytree_node_class
 @dataclasses.dataclass
 class All_Variables: 
-    particles: Sequence[particle,]
+    particles: Sequence[Particle,]
     velocity: grids.GridVariableVector
     pressure: grids.GridVariable
     Drag:Sequence[Any]
@@ -153,7 +147,6 @@ class All_Variables:
     def tree_flatten(self):
       """Returns flattening recipe for GridVariable JAX pytree."""
       children = (self.particles,self.velocity,self.pressure,self.Drag,self.Step_count,self.MD_var,)
- 
       aux_data = None
       return children, aux_data
 
@@ -161,23 +154,18 @@ class All_Variables:
     def tree_unflatten(cls, aux_data, children):
        """Returns unflattening recipe for GridVariable JAX pytree."""
        return cls(*children) 
-    
 
-        
-    
+
+
 @register_pytree_node_class
 @dataclasses.dataclass
-class particle_lista: # SEQUENCE OF VARIABLES MATTER !
-    particles: Sequence[particle,]
+class Particle_lista: # SEQUENCE OF VARIABLES MATTER !
+    particles: Sequence[Particle,]
 
-    
     def generate_grid(self):
-        
         return np.stack([grid.mesh() for grid in self.Grid])
-       
     def calc_Rtheta(self):
       return self.shape(self.geometry_param,self.Grid) 
-    
     def tree_flatten(self):
       """Returns flattening recipe for GridVariable JAX pytree."""
       children = (*self.particles,)
@@ -188,8 +176,3 @@ class particle_lista: # SEQUENCE OF VARIABLES MATTER !
     def tree_unflatten(cls, aux_data, children):
        """Returns unflattening recipe for GridVariable JAX pytree."""
        return cls(*children)
-    
-    
-
-    
-    

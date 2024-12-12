@@ -89,7 +89,7 @@ class ExplicitNavierStokesODE_BCtime:
   def Pressure_Grad(self, state):
     """Revert spurious updates of Wall BC """
     raise NotImplementedError
-    
+
   def Calculate_Drag(self, state):
     """Revert spurious updates of Wall BC """
     raise NotImplementedError
@@ -104,8 +104,8 @@ class ButcherTableau_updated:
   def __post_init__(self):
     if len(self.a) + 1 != len(self.b):
       raise ValueError("inconsistent Butcher tableau")
-      
-      
+
+
 def navier_stokes_rk_updated(
     tableau: ButcherTableau_updated,
     equation: ExplicitNavierStokesODE_BCtime,
@@ -133,14 +133,14 @@ def navier_stokes_rk_updated(
   M = tree_math.unwrap(equation.update_BC)
   R = tree_math.unwrap(equation.Reserve_BC)
   IBM = tree_math.unwrap(equation.IBM_force)
-  Update_Pos = tree_math.unwrap(equation.Update_Position) 
-  Grad_Pressure = tree_math.unwrap(equation.Pressure_Grad) 
-  Drag_Calculation = tree_math.unwrap(equation.Calculate_Drag)  
+  Update_Pos = tree_math.unwrap(equation.Update_Position)
+  Grad_Pressure = tree_math.unwrap(equation.Pressure_Grad)
+  Drag_Calculation = tree_math.unwrap(equation.Calculate_Drag)
 
   a = tableau.a
   b = tableau.b
   num_steps = len(b)
-  
+
   @tree_math.wrap
   def step_fn(u0):
     #print('vector',u0)
@@ -151,77 +151,78 @@ def navier_stokes_rk_updated(
     def convert_to_velocity_vecot(u0):
         u = u0.tree
         return tree_math.Vector(tuple(u[i].array for i in range(len(u))))
-        
+
     def convert_to_velocity_tree(m,bcs):
         return tree_math.Vector(tuple(grids.GridVariable(v,bc) for v,bc in zip(m.tree,bcs)))
-    
+
     def convert_all_variabl_to_velocity_vecot(u0):
         u = u0.tree.velocity
         #return tree_math.Vector(tuple(grids.GridVariable(v.array,v.bc) for v in u))
         return  tree_math.Vector(u)
+
     def covert_veloicty_to_All_variable_vecot(particles,m,pressure,Drag,Step_count,MD_var):
         u = m.tree
         #return tree_math.Vector(particle_class.All_Variables(particles, tuple(grids.GridVariable(v.array,v.bc) for v in u),pressure))
         return tree_math.Vector(particle_class.All_Variables(particles,u,pressure,Drag,Step_count,MD_var))
-    
+
     def velocity_bc(u0):
         u = u0.tree.velocity
         return tuple(u[i].bc for i in range(len(u)))
-    
+
     def the_particles(u0):
         return u0.tree.particles
+
     def the_pressure(u0):
         return u0.tree.pressure
+
     def the_Drag(u0):
         return u0.tree.Drag
-    
-    
+
+
     particles = the_particles(u0)
-    ubc = velocity_bc(u0)  
+    ubc = velocity_bc(u0)
     pressure = the_pressure(u0)
     Drag = the_Drag(u0)
     Step_count = u0.tree.Step_count
     MD_var = u0.tree.MD_var
-    
-    
+
+
     u0 = convert_all_variabl_to_velocity_vecot(u0)
 
-    
+
     u[0] = convert_to_velocity_vecot(u0)
     k[0] = convert_to_velocity_vecot(F(u0))
     dP = Grad_Pressure(tree_math.Vector(pressure))
 
-   
-
     u0 = convert_to_velocity_vecot(u0)
-    
+
     for i in range(1, num_steps):
         #u_star = u0[ww].array + sum(a[i-1][j]*k[j][ww].array for j in range(i) if a[i-1][j])
-        
+
       u_star = u0 + dt * sum(a[i-1][j] * k[j] for j in range(i) if a[i-1][j])
-    
+
       #u[i] = P(R(u_star))
-      u[i] = convert_to_velocity_vecot(P(convert_to_velocity_tree(u_star,ubc)))  
+      u[i] = convert_to_velocity_vecot(P(convert_to_velocity_tree(u_star,ubc)))
       k[i] = convert_to_velocity_vecot(F(convert_to_velocity_tree(u[i],ubc)))
 
     #for ww in range(0,len(u0)):
     u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP
-    
+
     Force = IBM(covert_veloicty_to_All_variable_vecot(particles,convert_to_velocity_tree(u_star,ubc),pressure,Drag,Step_count,MD_var))
-    
-    
+
+
     Drag_variable = Drag_Calculation(covert_veloicty_to_All_variable_vecot(particles,Force,pressure,Drag,Step_count,MD_var))
     Drag = the_Drag(Drag_variable)
-    
-    
+
+
     Force = convert_to_velocity_vecot(Force)
-    
+
     #Tree_force =  convert_to_velocity_tree(Force,ubc)
-    
-    
-    
+
+
+
     u_star_star = u_star + dt * Force
-    
+
    # for i in range(0,2):
    #     Force = IBM(covert_veloicty_to_All_variable_vecot(particles,convert_to_velocity_tree(u_star_star,ubc),pressure,Drag))
    #     if i==1:
@@ -229,29 +230,22 @@ def navier_stokes_rk_updated(
    #         Drag = the_Drag(Drag_variable)
    #     Force = convert_to_velocity_vecot(Force)
    #     u_star_star = u_star+ dt * Force
-    
     #u_final = P(R(u_star))
     #u_final = P(Force)
-    
-    
-    
-    
+
+
+
+
     u_final = convert_to_velocity_tree(u_star_star,ubc)
-    
-   
+
+
     u_final = covert_veloicty_to_All_variable_vecot(particles,u_final,pressure,Drag,Step_count,MD_var)
-    
-    
-    
+
     u_final = P(u_final)
     #u_final = P(u_star_star)
     u_final = M(u_final)
-    
-    
-    
-        
     u_final = Update_Pos(u_final) # the time step counter is also updated
-    
+
     return u_final
 
   return step_fn

@@ -72,6 +72,10 @@ def _advect_aligned(cs: GridVariableVector, v: GridVariableVector) -> GridArray:
   flux = tuple(c.array * u.array for c, u in zip(cs, v))
   # Flux inherits boundary conditions from cs
   flux = tuple(grids.GridVariable(f, c.bc) for f, c in zip(flux, cs))
+  # compute \nabla (c \vec v) which is the same as (\vec v \nabla) c due to div \vec v = 0.???
+  # c and v here are interpolated to the same points on the grid
+  # mganahl: it's not entirely clear to me how the offsets of the flux and
+  # the offsets of global velocity field v are related (different from v in this function). 
   return -fd.divergence(flux)
 
 
@@ -136,7 +140,7 @@ def _align_velocities(v: GridVariableVector) -> Tuple[GridVariableVector]:
     the appropriate face of the control volume centered around `v[j]`.
   """
   grid = grids.consistent_grid(*v)
-  #grid = v[0].grid  
+  #grid = v[0].grid
   offsets = tuple(grids.control_volume_offsets(u) for u in v)
   aligned_v = tuple(
       tuple(interpolation.linear(v[i], offsets[i][j])

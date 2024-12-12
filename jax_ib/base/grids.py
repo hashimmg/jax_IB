@@ -21,8 +21,9 @@ from typing import Any, Callable, Optional, Sequence, Tuple, Union
 from jax import core
 import jax
 import jax.numpy as jnp
-from jax.tree_util import register_pytree_node_class
+from jax.tree_util import register_pytree_node_class, register_dataclass
 import numpy as np
+import textwrap
 
 # TODO(jamieas): consider moving common types to a separate module.
 # TODO(shoyer): consider adding jnp.ndarray?
@@ -103,8 +104,8 @@ class BCArray(np.lib.mixins.NDArrayOperatorsMixin):
       return tuple(BCArray(r) for r in result)
     else:
       return BCArray(result)
-
-@register_pytree_node_class
+#register_pytree_node_class
+@jax.tree_util.Partial(register_dataclass, data_fields =['data'], meta_fields = ['offset','grid'])
 @dataclasses.dataclass
 class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   """Data with an alignment offset and an associated grid.
@@ -131,7 +132,11 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   data: Array
   offset: Tuple[float, ...]
   grid: Grid
-
+  def __repr__(self):
+    prefix = '    '
+    offsetrepr = textwrap.indent(f"offset: {repr(self.offset)}", prefix=prefix)
+    repr_string = f"GridArray\n{textwrap.indent(repr(self.data),prefix = prefix)}\n{textwrap.indent(repr(self.grid), prefix=prefix)}\n{offsetrepr}"
+    return repr_string
   def tree_flatten(self):
     """Returns flattening recipe for GridArray JAX pytree."""
     children = (self.data,)
@@ -328,7 +333,8 @@ class BoundaryConditions:
         'impose_bc() not implemented in BoundaryConditions base class.')
 
 
-@register_pytree_node_class
+#@register_pytree_node_class
+@jax.tree_util.Partial(register_dataclass, data_fields =['array','bc'], meta_fields=[])
 @dataclasses.dataclass
 class GridVariable:
   """Associates a GridArray with BoundaryConditions.
@@ -353,7 +359,6 @@ class GridVariable:
   """
   array: GridArray
   bc: BoundaryConditions
-
   def __post_init__(self):
     if not isinstance(self.array, GridArray):  # frequently missed by pytype
       raise ValueError(
@@ -457,6 +462,11 @@ class GridVariable:
     """
     return self.bc.impose_bc(self.array)
 
+  def __repr__(self):
+    prefix = '    '
+    bcstring = f"Boundary Condition: {repr(self.bc)}\n"
+    outstring = f"\nGridVariable\n {textwrap.indent(repr(self.array), prefix)}\n{textwrap.indent(bcstring, prefix)}"
+    return outstring
 
 GridVariableVector = Tuple[GridVariable, ...]
 
@@ -752,3 +762,9 @@ def domain_interior_masks(grid: Grid):
       mask = mask * upper * lower
     masks.append(mask)
   return tuple(masks)
+
+
+
+
+
+

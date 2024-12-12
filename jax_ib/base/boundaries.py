@@ -94,7 +94,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
 
   def update_bc_(self,time_stamp: float, dt: float):
     return time_stamp + dt
-       
+
 
   def shift(
       self,
@@ -493,7 +493,17 @@ def boundary_function(t):
   freq = 1
   return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))    
 
-def Reserve_BC(all_variable: particle_class.All_Variables,step_time: float) -> particle_class.All_Variables:
+def Reserve_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_class.All_Variables:
+    v = all_variable.velocity
+    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+    return _boundary_update(all_variable, ts, 0.0)
+
+def update_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_class.All_Variables:
+    v = all_variable.velocity
+    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+    return _boundary_update(all_variable, ts, ts)
+
+def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, time_stamp_2) -> particle_class.All_Variables:
     v = all_variable.velocity
     particles = all_variable.particles
     pressure = all_variable.pressure
@@ -502,46 +512,14 @@ def Reserve_BC(all_variable: particle_class.All_Variables,step_time: float) -> p
     MD_var = all_variable.MD_var
     bcfn = v[0].bc.boundary_fn
     bcfny = v[1].bc.boundary_fn
-    
-    dt = step_time
-    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
-    #ts = dt
-    vx_bc = ((bcfn[0](ts),bcfn[1](0.0)),(bcfn[2](ts),bcfn[3](0.0)))
-    vy_bc = ((bcfny[0](ts),bcfny[1](0.0)),(bcfny[2](ts),bcfny[3](0.0)))
-    #vel_bc =(Moving_wall_boundary_conditions(ndim=2,bc_vals=vx_bc,time_stamp=ts,bc_fn=bcfn),Moving_wall_boundary_conditions(ndim=2,bc_vals=vy_bc,time_stamp=ts,bc_fn=bcfn))
-    vel_bc = (ConstantBoundaryConditions(values=vx_bc,time_stamp=ts,types=v[0].bc.types,boundary_fn=bcfn),
-              ConstantBoundaryConditions(values=vy_bc,time_stamp=ts,types=v[1].bc.types,boundary_fn=bcfny))
-    #return v
-    #return tuple(grids.GridVariable(u.array, u.bc) for u in v)
-   
-    v_updated =  tuple(     
-      grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
-    return particle_class.All_Variables(particles,v_updated,pressure,Drag,Step_count,MD_var)
-  
 
+    vx_bc = ((bcfn[0](time_stamp_1),bcfn[1](time_stamp_2)),(bcfn[2](time_stamp_1),bcfn[3](time_stamp_2)))
+    vy_bc = ((bcfny[0](time_stamp_1),bcfny[1](time_stamp_2)),(bcfny[2](time_stamp_1),bcfny[3](time_stamp_2)))
 
-def update_BC(all_variable: particle_class.All_Variables,step_time: float) -> particle_class.All_Variables:
-    v = all_variable.velocity
-    particles = all_variable.particles
-    pressure = all_variable.pressure
-    Drag = all_variable.Drag
-    Step_count = all_variable.Step_count
-    MD_var = all_variable.MD_var
-    bcfn = v[0].bc.boundary_fn
-    bcfny = v[1].bc.boundary_fn
-    
-    dt = step_time
-    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
-    #ts = dt
-    vx_bc = ((bcfn[0](ts),bcfn[1](ts)),(bcfn[2](ts),bcfn[3](ts)))
-    vy_bc = ((bcfny[0](ts),bcfny[1](ts)),(bcfny[2](ts),bcfny[3](ts)))
-    #vel_bc =(Moving_wall_boundary_conditions(ndim=2,bc_vals=vx_bc,time_stamp=ts,bc_fn=bcfn),Moving_wall_boundary_conditions(ndim=2,bc_vals=vy_bc,time_stamp=ts,bc_fn=bcfn))
-    vel_bc = (ConstantBoundaryConditions(values=vx_bc,time_stamp=ts,types=v[0].bc.types,boundary_fn=bcfn),
-              ConstantBoundaryConditions(values=vy_bc,time_stamp=ts,types=v[1].bc.types,boundary_fn=bcfny))
-    #return v
-    #return tuple(grids.GridVariable(u.array, u.bc) for u in v)
-   
-    v_updated =  tuple(     
+    vel_bc = (ConstantBoundaryConditions(values=vx_bc,time_stamp=time_stamp_1,types=v[0].bc.types,boundary_fn=bcfn),
+              ConstantBoundaryConditions(values=vy_bc,time_stamp=time_stamp_1,types=v[1].bc.types,boundary_fn=bcfny))
+
+    v_updated =  tuple(
       grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
     return particle_class.All_Variables(particles,v_updated,pressure,Drag,Step_count,MD_var)
 

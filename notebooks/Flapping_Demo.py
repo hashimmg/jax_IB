@@ -180,7 +180,7 @@ if __name__== "__main__":
         return all_variables
 
     # Force convolution kernel
-    discrete_delta = lambda x,x0,w1: convolution_functions.delta_approx_logistjax(x,x0,w1)
+    discrete_delta = lambda x,x0,w1: convolution_functions.gaussian(x,x0,w1)
 
     # Convultion Discretized Integral
     surf_fn =  lambda field,xp,yp:convolution_functions.new_surf_fn(field,xp,yp,discrete_delta)
