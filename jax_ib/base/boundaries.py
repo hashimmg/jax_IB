@@ -472,7 +472,6 @@ class TimeDependentBoundaryConditions(ConstantBoundaryConditions):
 
     #ndim = len(types)
     #values = ((0.0, 0.0),) * ndim
-    
     super(TimeDependentBoundaryConditions, self).__init__(types, values,boundary_fn,time_stamp)
 
   def tree_flatten(self):
@@ -491,17 +490,19 @@ def boundary_function(t):
   A=1
   B = 1
   freq = 1
-  return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))    
+  return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))
 
 def Reserve_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_class.All_Variables:
     v = all_variable.velocity
     ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+
     return _boundary_update(all_variable, ts, 0.0)
 
 def update_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_class.All_Variables:
     v = all_variable.velocity
     ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
-    return _boundary_update(all_variable, ts, ts)
+    out= _boundary_update(all_variable, ts, ts)
+    return out
 
 def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, time_stamp_2) -> particle_class.All_Variables:
     v = all_variable.velocity

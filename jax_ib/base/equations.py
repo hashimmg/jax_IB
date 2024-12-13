@@ -52,11 +52,13 @@ def navier_stokes_explicit_terms(
   del grid  # unused
 
   if convect is None:
-    def convect(v):  # pylint: disable=function-redefined
+    def convect(v:tuple[GridVariable]):  # pylint: disable=function-redefined
       return tuple(
           advection.advect_van_leer_using_limiters(u, v, dt) for u in v)
 
-  def diffuse_velocity(v, *args):
+  def diffuse_velocity(v: tuple[GridVariable], *args):
+    """ v is the velocity field, i.e. x-, y- and z-components.
+    """
     return tuple(diffuse(u, *args) for u in v)
 
   convection = _wrap_term_as_vector(convect, name='convection')
@@ -66,7 +68,9 @@ def navier_stokes_explicit_terms(
 
   @tree_math.wrap
   @functools.partial(jax.named_call, name='navier_stokes_momentum')
-  def _explicit_terms(v):
+  def _explicit_terms(v:GridVariable):
+    """ v is the velocity field, i.e. x-, y- and z-components.
+    """
     dv_dt = convection(v)
     if viscosity is not None:
       dv_dt += diffusion_(v, viscosity / density)
@@ -75,7 +79,9 @@ def navier_stokes_explicit_terms(
 
     return dv_dt
 
-  def explicit_terms_with_same_bcs(v):
+  def explicit_terms_with_same_bcs(v:tuple[GridVariable]):
+    """ v is the velocity field, i.e. x-, y- and z-components.
+    """
     dv_dt = _explicit_terms(v)
     return tuple(grids.GridVariable(a, u.bc) for a, u in zip(dv_dt, v))
 
@@ -200,7 +206,7 @@ def semi_implicit_navier_stokes_timeBC(
 ) -> Callable[[GridVariableVector], GridVariableVector]:
   """Returns a function that performs a time step of Navier Stokes."""
 
-  # exlplicit terms include
+  # momentum updates
   explicit_terms = navier_stokes_explicit_terms(
       density=density,
       viscosity=viscosity,
@@ -222,7 +228,8 @@ def semi_implicit_navier_stokes_timeBC(
   # advection/diffusion are staggered in time.
   ode = time_stepping.ExplicitNavierStokesODE_BCtime(
       explicit_terms,
-      lambda v: pressure_projection(v, pressure_solve),
+      #lambda v: pressure_projection(v, pressure_solve), 
+      lambda v,p: pressure_projection(v, p, pressure_solve),
       update_BC,
       Reserve_BC,
       IBM_force,

@@ -220,5 +220,6 @@ if __name__== "__main__":
 
     rollout_fn = cfd.funcutils.trajectory(
             step_fn, args.time_steps, start_with_input=True)
+
     final_result, trajectory = jax.device_get(rollout_fn(all_variables))
 
