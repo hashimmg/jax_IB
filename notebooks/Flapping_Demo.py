@@ -138,7 +138,7 @@ if __name__== "__main__":
     # Immersed Objects Geometery and Initial locations
     # object is described by center of the object
     # theta is here a dummy variable; if f-term was used in addition to the f_b term, we'd need theat
-    def ellipse_shape(geometry_param,theta):
+    def ellipse(geometry_param,theta):
         A = geometry_param[0]
         B = geometry_param[1]
         ntheta=150#30#400#51
@@ -160,11 +160,11 @@ if __name__== "__main__":
     mygrids = pc.Grid1d(2, domain= (0, 2*jnp.pi)) # Only needed when using Penalty method simulation setup
 
     #wrap everythin into a single convenience object
-    particles =  pc.particle(particle_center_position,
+    particles =  pc.Particle(particle_center_position,
                              particle_geometry_param,
                              displacement_param,
                              rotation_param,mygrids,
-                             ellipse_shape,
+                             ellipse,
                              ks.displacement, # harmonic movement of the center in x-direction, coonstant in y-direction
                              ks.rotation) # constant rotation of the ellipse
 
@@ -179,18 +179,22 @@ if __name__== "__main__":
     def internal_post_processing(all_variables,dt):
         return all_variables
 
+
     # Force convolution kernel
     discrete_delta = lambda x,x0,w1: convolution_functions.gaussian(x,x0,w1)
 
-    # Convultion Discretized Integral
-    surf_fn =  lambda field,xp,yp:convolution_functions.new_surf_fn(field,xp,yp,discrete_delta)
-
+    # Convolution Discretized Integral
+    surf_fn =  lambda field,xp,yp:convolution_functions.convolve(field,xp,yp,discrete_delta)
     # IB forcing function
-    IBM_forcing = lambda v,dt: IBM_Force.calc_IBM_force_NEW_MULTIPLE(v,discrete_delta,surf_fn,dt)
+    IBM_forcing = lambda variables,dt: IBM_Force.immersed_boundary_force(variables.velocity,
+                                                                         variables.particles,
+                                                                         discrete_delta,
+                                                                         surf_fn,
+                                                                         dt)
 
     # Update particle position function
     Update_position = particle_motion.Update_particle_position_Multiple
-    
+
     def convect(v):
       return tuple(advection.advect_upwind(u, v, args.dt) for u in v)
 

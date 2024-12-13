@@ -95,7 +95,7 @@ def IBM_force_GENERAL_deprecated(field,Xi,particle_center,geom_param,Grid_p,shap
     #mapped = jnp.array([force,xp,yp])
     #remapped = mapped.reshape(())#jnp.array([[force[:n],xp[:n],yp[:n]],[force[n:],xp[n:],yp[n:]]])
 
-    #return cfd.grids.GridArray(jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)),axis=0),offset,grid)
+    #return cfd.GridArray(jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)),axis=0),offset,grid)
     out = jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)),axis=0)
     #out = jnp.sum(foo_pmap(force, xp, yp, dS),axis=0)
     #out = foo_pmap(force, xp, yp, dS)
@@ -104,7 +104,7 @@ def IBM_force_GENERAL_deprecated(field,Xi,particle_center,geom_param,Grid_p,shap
 
 
 def immersed_boundary_force_per_particle(
-    velocity_field: tuple[GridVariable, GidVariable],
+    velocity_field: tuple[GridVariable, GridVariable],
     particle_center: jax.Array,
     geom_param:jax.Array,
     Grid_p:jax.Array,
@@ -178,7 +178,7 @@ def immersed_boundary_force_per_particle(
 
 
 
-def immersed_boundary_force(velocity_field: tuple[GridVariable, GidVariable],
+def immersed_boundary_force(velocity_field: tuple[GridVariable, GridVariable],
                             particles: Particle,
                             dirac_delta_approx: callable,
                             surface_fn: callable,
@@ -227,6 +227,6 @@ def immersed_boundary_force(velocity_field: tuple[GridVariable, GidVariable],
           surface_fn,dx_dt,domega_dt,rotation,dt)
         forcex += per_object_forcex
         forcey += per_object_forcey
-    return (grids.GridVariable(grids.GridArray(forcex,velocity_field[0].offset,velocity_field[0].grid), velocity_field[0].bc),
-            grids.GridVariable(grids.GridArray(forcey,velocity_field[1].offset,velocity_field[1].grid), velocity_field[1].bc))
+    return (GridVariable(GridArray(forcex,velocity_field[0].offset,velocity_field[0].grid), velocity_field[0].bc),
+            GridVariable(GridArray(forcey,velocity_field[1].offset,velocity_field[1].grid), velocity_field[1].bc))
 
