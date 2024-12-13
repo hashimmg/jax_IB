@@ -12,6 +12,11 @@ def rotation(parameters,t):
     alpha0,beta,f,phi = list(*parameters)
     return alpha0 + beta*jnp.sin(2*jnp.pi*f*t+phi)
 
+def rotation2(parameters,t):
+    alpha0,beta,f,phi = list(*parameters)
+    return alpha0*t
+
+
 def Displacement_Foil_Fourier_Dotted_Mutliple(parameters,t):
 
     alpha0=jnp.array(list(list(zip(*parameters))[0]))
