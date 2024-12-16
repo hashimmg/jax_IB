@@ -186,11 +186,11 @@ if __name__== "__main__":
     # Convolution Discretized Integral
     surf_fn =  lambda field,xp,yp:convolution_functions.convolve(field,xp,yp,discrete_delta)
     # IB forcing function
-    IBM_forcing = lambda variables,dt: IBM_Force.immersed_boundary_force(variables.velocity,
-                                                                         variables.particles,
-                                                                         discrete_delta,
-                                                                         surf_fn,
-                                                                         dt)
+    IBM_forcing = lambda variables,dt: IBM_Force.immersed_boundary_force(variables[0], #velocity,
+                                                                     variables[1], #particles 
+                                                                     discrete_delta,
+                                                                     surf_fn,
+                                                                     dt)
 
     # Update particle position function
     Update_position = particle_motion.Update_particle_position_Multiple
