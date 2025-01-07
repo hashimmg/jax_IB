@@ -789,24 +789,25 @@ def get_pressure_bc_from_velocity(v: GridVariableVector) -> BoundaryConditions:
       pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
     else:
       pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
+  # mganahl: why time_stamp=2.0???
   return ConstantBoundaryConditions(values=bc_value,time_stamp=2.0,types=pressure_bc_types,boundary_fn=Bc_f)
 
-# def get_pressure_bc_from_velocity(v: GridVariableVector,
-#                                   boundary_fn) -> ConstantBoundaryConditions:
-#   """Returns pressure boundary conditions for the specified velocity variables.
-#   Assumes 2d geometry"""
-#   # assumes that if the boundary is not periodic, pressure BC is zero flux.
-#   # TODO: this is not particularly clean, need to improve
-#   velocity_bc_types = consistent_boundary_conditions(*v)
-#   pressure_bc_types = []
-#   for velocity_bc_type in velocity_bc_types:
-#     if velocity_bc_type == 'periodic':
-#       pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
-#     else:
-#       pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
-#   # mganahl: why time_stamp=2.0???
-#   bc_value = ((0.0,0.0),(0.0,0.0))
-#   return ConstantBoundaryConditions(values=bc_value,time_stamp=2.0,types=pressure_bc_types,boundary_fn=boundary_fn)
+def get_pressure_bc_from_velocity_deprecated(v: GridVariableVector,
+                                  boundary_fn) -> ConstantBoundaryConditions:
+  """Returns pressure boundary conditions for the specified velocity variables.
+  Assumes 2d geometry"""
+  # assumes that if the boundary is not periodic, pressure BC is zero flux.
+  # TODO: this is not particularly clean, need to improve
+  velocity_bc_types = consistent_boundary_conditions(*v)
+  pressure_bc_types = []
+  for velocity_bc_type in velocity_bc_types:
+    if velocity_bc_type == 'periodic':
+      pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
+    else:
+      pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
+  # mganahl: why time_stamp=2.0???
+  bc_value = ((0.0,0.0),(0.0,0.0))
+  return ConstantBoundaryConditions(values=bc_value,time_stamp=2.0,types=pressure_bc_types,boundary_fn=boundary_fn)
 
 
 

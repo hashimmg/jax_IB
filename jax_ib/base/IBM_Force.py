@@ -69,7 +69,7 @@ def IBM_force_GENERAL_deprecated(field,Xi,particle_center,geom_param,Grid_p,shap
 
     def calc_force(F,xp,yp,dss):
         # mganahl: Need to understand this better. In the code the dirac_delta_approx was formerly called discrete_fn, and they used a gaussian for that.
-        #          All I did was renaming the function. Why are they computing the squares here again?
+        #          All I did was renaming the function. Why computing the squares here again?
         return F*dirac_delta_approx(jnp.sqrt((xp-X)**2 + (yp-Y)**2),0,dxEUL)*dss
         #return F*dirac_delta_approx(xp-X,0,dxEUL)*dirac_delta_approx(yp-Y,0,dyEUL)*dss
         #return F*dirac_delta_approx(xp,X,dxEUL)*dirac_delta_approx(yp,Y,dyEUL)*dss**2
