@@ -611,7 +611,7 @@ class Grid:
             raise ValueError(
                 f'domain is not sequence of pairs of numbers: {domain}')
       domain = tuple((float(lower), float(upper)) for lower, upper in domain)
-      
+
     else:
       if step is None:
         step = 1

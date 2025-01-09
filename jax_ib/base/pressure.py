@@ -77,7 +77,7 @@ def projection_and_update_pressure(
   q = grids.GridVariable(qsol, pressure_bc)
 
   New_pressure_Array =  grids.GridArray(qsol.data + pressure.data,qsol.offset,qsol.grid)
-  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc) 
+  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc)
 
   q_grad = fd.forward_difference(q)
   if boundaries.has_all_periodic_boundary_conditions(*v):
@@ -98,7 +98,7 @@ def projection_and_update_pressure_deprecated(
   v = All_variables.velocity
   old_pressure = All_variables.pressure
   particles = All_variables.particles
-  Drag =  All_variables.Drag 
+  Drag =  All_variables.Drag
   Step_count = All_variables.Step_count
   MD_var = All_variables.MD_var
   grid = grids.consistent_grid(*v)
@@ -110,8 +110,8 @@ def projection_and_update_pressure_deprecated(
   qsol = solve(v, q0)
   q = grids.GridVariable(qsol, pressure_bc)
 
-  New_pressure_Array =  grids.GridArray(qsol.data + old_pressure.data,qsol.offset,qsol.grid)  
-  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc) 
+  New_pressure_Array =  grids.GridArray(qsol.data + old_pressure.data,qsol.offset,qsol.grid)
+  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc)
 
   q_grad = fd.forward_difference(q)
   if boundaries.has_all_periodic_boundary_conditions(*v):

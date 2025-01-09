@@ -169,7 +169,7 @@ def navier_stokes_rk_updated(
       u[i] = tree_math.Vector(u_temp)
       k[i] = explicit_terms(u[i])
 
-    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it
+    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it back
     u_star.tree[0].bc.time_stamp = time_stamp
     u_star.tree[1].bc.time_stamp = time_stamp
 
@@ -183,7 +183,12 @@ def navier_stokes_rk_updated(
     return updated_variables
   return step_fn
 
-def navier_stokes_rk_updated_deprected(
+
+def step_fn(pressure, velocity):
+  pass
+
+
+def navier_stokes_rk_updated_deprecated(
     tableau: ButcherTableau_updated,
     equation: ExplicitNavierStokesODE_BCtime,
     time_step: float,

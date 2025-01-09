@@ -146,7 +146,7 @@ def immersed_boundary_force_per_particle(
     offset = ux.offset
     X,Y = grid.mesh(offset) #2d is hard coded right now
     dx = grid.step[0]
-    #dy = grid.step[1] # uncomment for different cal_force functions below
+    #dy = grid.step[1] # uncomment for different calc_force functions below
     current_t = ux.bc.time_stamp
     xp0,yp0 = shape_fn(geom_param,Grid_p)
     xp = xp0*jnp.cos(rotation(current_t))-yp0*jnp.sin(rotation(current_t))+particle_center[0]
@@ -155,7 +155,7 @@ def immersed_boundary_force_per_particle(
     uy_at_surface = surface_fn(uy,xp,yp)
 
     U0 = dx_dt(current_t) # 2-d speed of the center of mass
-    Omega=dalpha_dt(current_t) #
+    Omega = dalpha_dt(current_t) #
     # include angular rotation of the object
     UPx= U0[0] - Omega*(yp-particle_center[1])
     UPy= U0[1] + Omega*(xp-particle_center[0])

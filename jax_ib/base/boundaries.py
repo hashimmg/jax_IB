@@ -68,13 +68,13 @@ class ConstantBoundaryConditions(BoundaryConditions):
     values = tuple(values)
     boundary_fn = boundary_fn
     time_stamp = time_stamp
-    
+
     object.__setattr__(self, 'bc_values', values)
     object.__setattr__(self, 'boundary_fn', boundary_fn)
     object.__setattr__(self, 'time_stamp', time_stamp if time_stamp is not None else [])
     object.__setattr__(self, 'types', types)
     #if boundary_fn or not boundary_fn:
-      
+
     #else:
     #  object.__setattr__(self, 'boundary_fn', None)
     # object.__setattr__(self, 'time_stamp', None)
@@ -640,16 +640,13 @@ def Moving_wall_boundary_conditions(
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
 
-  
-    
-
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
 
 
 def Far_field_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],    
+    time_stamp: Optional[float],
     bc_fn: Callable[...,Optional[float]],
 
 ) -> ConstantBoundaryConditions:
@@ -669,9 +666,6 @@ def Far_field_boundary_conditions(
              (BCType.DIRICHLET, BCType.DIRICHLET))
   for _ in range(ndim - 2):
     bc_type += ((BCType.DIRICHLET, BCType.DIRICHLET),)
-
-  
-    
 
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
 
@@ -853,7 +847,7 @@ def get_advection_flux_bc_from_velocity_and_scalar(
 def new_periodic_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],    
+    time_stamp: Optional[float],
     bc_fn: Callable[...,Optional[float]],
 
 ) -> ConstantBoundaryConditions:
@@ -873,8 +867,5 @@ def new_periodic_boundary_conditions(
              (BCType.PERIODIC, BCType.PERIODIC))
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
-
-  
-    
 
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
