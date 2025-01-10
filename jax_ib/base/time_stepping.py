@@ -149,7 +149,6 @@ def navier_stokes_rk_updated(
         """
         return tree_math.Vector(tuple(grids.GridVariable(dp,bc) for dp,bc in zip(pressure_gradient.tree,bcs)))
 
-
     particles = all_variables.particles
     ubc = tuple([v.bc for v in all_variables.velocity])
     pressure = tree_math.Vector(all_variables.pressure)
@@ -168,13 +167,14 @@ def navier_stokes_rk_updated(
       u_temp, _ = pressure_projection(pressure, u_star).tree
       u[i] = tree_math.Vector(u_temp)
       k[i] = explicit_terms(u[i])
-
+    # mganahl: why is dP below not multiplied by dt?
     u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it back
     u_star.tree[0].bc.time_stamp = time_stamp
     u_star.tree[1].bc.time_stamp = time_stamp
 
-    Force = IBM(tree_math.Vector((u_star.tree, particles)))
-    u_star_star = u_star + dt * Force
+    #Force = IBM(tree_math.Vector((u_star.tree, particles)))
+    #u_star_star = u_star + dt * Force
+    u_star_star = u_star
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
 
     updated_variables = All_Variables(particles,u_final,new_pressure,Drag,Step_count,MD_var)
@@ -184,8 +184,46 @@ def navier_stokes_rk_updated(
   return step_fn
 
 
-def step_fn(pressure, velocity):
-  pass
+def step_fn(all_variables: All_Variables):
+    def pressure_gradient_to_GridVariable(pressure_gradient,bcs):
+        """
+        unwrap pressure_gradient (tm.Vector[tuple[GridArray, GridArray]]
+        and rewrap into tm.Vector[tuple[GridVariable, GridVariable]
+        """
+        return tree_math.Vector(tuple(grids.GridVariable(dp,bc) for dp,bc in zip(pressure_gradient.tree,bcs)))
+
+
+    explicit_terms = navier_stokes_explicit_terms()
+    ubc = tuple([v.bc for v in all_variables.velocity])
+    pressure = tree_math.Vector(all_variables.pressure)
+
+    velocity_field = tree_math.Vector(all_variables.velocity) # all_variables.velocity is type tuple[GridVariable, GridVariable]
+    u = [velocity_field]
+    k = [explicit_terms(velocity_field)]
+
+    dP = pressure_gradient_to_GridVariable(Grad_Pressure(pressure), ubc)
+    u0 = velocity_field
+    for i in range(1, num_steps):
+      u_star = u0 + dt * sum(a[i-1][j] * k[j] for j in range(i) if a[i-1][j])
+      u_temp, _ = pressure_projection(pressure, u_star).tree
+      u[i] = tree_math.Vector(u_temp)
+      k[i] = explicit_terms(u[i])
+    # mganahl: why is dP below not multiplied by dt?
+    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it back
+    u_star.tree[0].bc.time_stamp = time_stamp
+    u_star.tree[1].bc.time_stamp = time_stamp
+
+    #Force = IBM(tree_math.Vector((u_star.tree, particles)))
+    #u_star_star = u_star + dt * Force
+    u_star_star = u_star
+    u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
+
+    updated_variables = All_Variables(particles,u_final,new_pressure,Drag,Step_count,MD_var)
+    updated_variables = equation.update_BC(updated_variables)
+    updated_variables = equation.Update_Position(updated_variables) # the time step counter is also updated
+    return updated_variables
+
+
 
 
 def navier_stokes_rk_updated_deprecated(

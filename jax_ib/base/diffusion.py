@@ -19,9 +19,9 @@ from typing import Optional
 
 import jax.scipy.sparse.linalg
 
-from jax_cfd.base import array_utils
+from jax_ib.base import array_utils
 from jax_ib.base import boundaries
-from jax_cfd.base import fast_diagonalization
+from jax_ib.base import fast_diagonalization
 from jax_ib.base import finite_differences as fd
 from jax_ib.base import grids
 
