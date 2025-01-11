@@ -70,7 +70,28 @@ def _rhs_transform(
   return u_data
 
 
-def projection_and_update_pressure(
+def solve_fast_diag(
+    v: GridVariableVector,
+    q0: Optional[GridVariable] = None,
+    implementation: Optional[str] = None) -> GridArray:
+  """
+  Solve for pressure using the fast diagonalization approach.
+  This version is less general than the one in jax-cfd and works
+  only for periodic boundary conditions.
+  """
+  del q0  # unused
+  if not boundaries.has_all_periodic_boundary_conditions(*v):
+    raise ValueError('solve_fast_diag() expects periodic velocity BC')
+  grid = grids.consistent_grid(*v)
+  rhs = fd.divergence(v)
+  laplacians = list(map(array_utils.laplacian_matrix, grid.shape, grid.step))
+  pinv = fast_diagonalization.pseudoinverse(
+      laplacians, rhs.dtype,
+      hermitian=True, circulant=True, implementation=implementation)
+  return grids.applied(pinv)(rhs)
+
+
+def projection_and_update_pressure_pinv(
     pressure: GridVariable,
     velocity: tuple[GridVariable],
     pinv: callable,
@@ -98,6 +119,40 @@ def projection_and_update_pressure(
         for u, q_g in zip(v, q_grad))
   return v_projected, new_pressure
 
+
+def projection_and_update_pressure(
+    pressure: GridVariable,
+    velocity: tuple[GridVariable],
+    solve: Callable = solve_fast_diag,
+) -> GridVariableVector:
+  """Apply pressure projection to make a velocity field divergence free."""
+  v = velocity
+  #old_pressure = All_variables.pressure
+  #particles = All_variables.particles
+  #Drag =  All_variables.Drag
+  #Step_count = All_variables.Step_count
+  #MD_var = All_variables.MD_var
+  grid = grids.consistent_grid(*v)
+  pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
+
+  q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid)
+  q0 = grids.GridVariable(q0, pressure_bc)
+
+  qsol = solve(v, q0)
+  q = grids.GridVariable(qsol, pressure_bc)
+
+  New_pressure_Array =  grids.GridArray(qsol.data + pressure.data,qsol.offset,qsol.grid)
+  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc)
+
+  q_grad = fd.forward_difference(q)
+  if boundaries.has_all_periodic_boundary_conditions(*v):
+    v_projected = tuple(
+        grids.GridVariable(u.array - q_g, u.bc) for u, q_g in zip(v, q_grad))
+  else:
+    v_projected = tuple(
+        grids.GridVariable(u.array - q_g, u.bc).impose_bc()
+        for u, q_g in zip(v, q_grad))
+  return v_projected, New_pressure
 
 def solve_fast_diag_moving_wall(
     v: GridVariableVector,

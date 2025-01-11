@@ -10,13 +10,12 @@ from jax_ib.base import advection
 from jax_ib.base import diffusion
 from jax_ib.base import grids
 from jax_ib.base import pressure
-from jax_cfd.base import pressure as pressureCFD
 from jax_ib.base import time_stepping
 from jax_ib.base import boundaries
 from jax_ib.base import finite_differences
 import tree_math
 from jax_ib.base import particle_class
-from jax_cfd.base import equations as equationsCFD
+
 
 GridArray = grids.GridArray
 GridArrayVector = grids.GridArrayVector
@@ -196,7 +195,7 @@ def semi_implicit_navier_stokes_timeBC(
     grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
-    pressure_solve: Callable = pressureCFD.solve_fast_diag,
+    pressure_solve: Callable = pressure.solve_fast_diag,
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_updated,
     IBM_forcing: IBMFn=None,
@@ -248,7 +247,7 @@ def semi_implicit_navier_stokes_penalty(
     grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
-    pressure_solve: Callable = pressureCFD.solve_fast_diag,
+    pressure_solve: Callable = pressure.solve_fast_diag,
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_penalty,
 ) -> Callable[[GridVariableVector], GridVariableVector]:
