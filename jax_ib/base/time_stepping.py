@@ -172,8 +172,8 @@ def navier_stokes_rk_updated(
     u_star.tree[0].bc.time_stamp = time_stamp
     u_star.tree[1].bc.time_stamp = time_stamp
 
-    #Force = IBM(tree_math.Vector((u_star.tree, particles)))
-    #u_star_star = u_star + dt * Force
+    Force = IBM(tree_math.Vector((u_star.tree, particles)))
+    u_star_star = u_star + dt * Force
     u_star_star = u_star
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
 
