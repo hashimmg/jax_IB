@@ -28,14 +28,14 @@ def convolve(field:GridVariable,xp:float,yp:float, dirac_delta_approx: callable)
     with grid-points (x[i], y[j]), a 2d function data[i,j], and two points xp and yp,
     it computes
 
-    `sum_{i,j} data[i,j] delta(x[i]-xp]) delta(y[j]-yp)  dx  dy)`
+    `sum_{i,j} data[i,j] delta(x[i]-xp) delta(y[j]-yp)  dx  dy)`
 
     The point xp, yp does not have to be a grid point.
     The delta function requires the following signature:
     dirac_delta_approx(xp, X, dx)
     dirac_delta_approx(yp, Y, dy)
 
-    with X the X, Y = grid.mesh() a mesh of the 2d grid, and dx, dx the grid spacing.
+    with X, Y = grid.mesh() a mesh of the 2d grid, and dx, dx the grid spacing.
 
     Args:
       field: GridVariable whose data `field.data` to convolve as described above
@@ -53,7 +53,8 @@ def convolve(field:GridVariable,xp:float,yp:float, dirac_delta_approx: callable)
     dy = grid.step[1]
     return jnp.sum(field.data*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dx*dy)
 
-def old_surf_fn(field,xp,yp,discrete_fn):
+
+def surf_fn_deprecated(field,xp,yp,discrete_fn):
     """
     Deprecated; use `convolve` above """
     grid = field.grid
@@ -78,6 +79,4 @@ def old_surf_fn(field,xp,yp,discrete_fn):
         mapped.append([xp[i*n:(i+1)*n],yp[i*n:(i+1)*n]])
     arr = jnp.array(mapped)
     U_deltas = jax.pmap(foo_pmap)(jnp.array(mapped))
-    return U_deltas.flatten()
-
-  
+    return U_deltas.flatten()  

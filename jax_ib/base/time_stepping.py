@@ -54,13 +54,12 @@ class ExplicitNavierStokesODE_BCtime:
     0 = incompressibility_constraint(u)
   """
 
-  def __init__(self, explicit_terms, pressure_projection,update_BC,Reserve_BC,IBM_force,Update_Position,Pressure_Grad,Calculate_Drag):
+  def __init__(self, explicit_terms, pressure_projection,update_BC,Reserve_BC,IBM_force,Pressure_Grad,Calculate_Drag):
     self.explicit_terms = explicit_terms
     self.pressure_projection = pressure_projection
     self.update_BC = update_BC
     self.Reserve_BC = Reserve_BC
     self.IBM_force = IBM_force
-    self.Update_Position = Update_Position
     self.Pressure_Grad = Pressure_Grad
     self.Calculate_Drag = Calculate_Drag
 
@@ -80,10 +79,6 @@ class ExplicitNavierStokesODE_BCtime:
     """Revert spurious updates of Wall BC """
     raise NotImplementedError
   def IBM_force(self, state):
-    """Revert spurious updates of Wall BC """
-    raise NotImplementedError
-
-  def Update_Position(self, state):
     """Revert spurious updates of Wall BC """
     raise NotImplementedError
 
@@ -131,7 +126,8 @@ def navier_stokes_rk_updated(
   dt = time_step
   explicit_terms = tree_math.unwrap(equation.explicit_terms) # explicit update function, takes velocity (tuple[GridVariable]) as input
   pressure_projection = tree_math.unwrap(equation.pressure_projection) #takes velocity and pressure and returns updated velocity and pressure
-  IBM = tree_math.unwrap(equation.IBM_force)
+  #IBM = tree_math.unwrap(equation.IBM_force)
+  IBM = equation.IBM_force
   Grad_Pressure = tree_math.unwrap(equation.Pressure_Grad)
 
   a = tableau.a
@@ -141,7 +137,7 @@ def navier_stokes_rk_updated(
   def step_fn(all_variables: All_Variables):
     u = [None] * num_steps
     k = [None] * num_steps
-    time_stamp = all_variables.velocity[1].bc.time_stamp
+    time_stamp = all_variables.velocity[1].bc.time_stamp # TODO (mganahl): improve keeping way of time
     def pressure_gradient_to_GridVariable(pressure_gradient,bcs):
         """
         unwrap pressure_gradient (tm.Vector[tuple[GridArray, GridArray]]
@@ -149,12 +145,8 @@ def navier_stokes_rk_updated(
         """
         return tree_math.Vector(tuple(grids.GridVariable(dp,bc) for dp,bc in zip(pressure_gradient.tree,bcs)))
 
-    particles = all_variables.particles
     ubc = tuple([v.bc for v in all_variables.velocity])
     pressure = tree_math.Vector(all_variables.pressure)
-    Drag = all_variables.Drag
-    Step_count = all_variables.Step_count
-    MD_var = all_variables.MD_var
 
     velocity_field = tree_math.Vector(all_variables.velocity) # all_variables.velocity is type tuple[GridVariable, GridVariable]
     u[0] = velocity_field
@@ -167,19 +159,22 @@ def navier_stokes_rk_updated(
       u_temp, _ = pressure_projection(pressure, u_star).tree
       u[i] = tree_math.Vector(u_temp)
       k[i] = explicit_terms(u[i])
+
     # mganahl: why is dP below not multiplied by dt?
     u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it back
     u_star.tree[0].bc.time_stamp = time_stamp
     u_star.tree[1].bc.time_stamp = time_stamp
 
-    Force = IBM(tree_math.Vector((u_star.tree, particles)))
+    Force = tree_math.Vector(IBM(u_star.tree, time_stamp, dt))
     u_star_star = u_star + dt * Force
+    
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
 
-    updated_variables = All_Variables(particles,u_final,new_pressure,Drag,Step_count,MD_var)
-    updated_variables = equation.update_BC(updated_variables)
-    updated_variables = equation.Update_Position(updated_variables) # the time step counter is also updated
+    updated_variables = All_Variables(u_final,new_pressure, all_variables.Drag, all_variables.Step_count + 1,all_variables.MD_var)
+    updated_variables = equation.update_BC(updated_variables) # boundary conditions may be time dependent
+
     return updated_variables
+
   return step_fn
 
 
@@ -203,6 +198,7 @@ def navier_stokes_rk_penalty(
   Returns:
     Function that advances one time-step forward.
   """
+  raise NotImplementedError("Currenty not implemented")
   # pylint: disable=invalid-name
   dt = time_step
   F = tree_math.unwrap(equation.explicit_terms)
