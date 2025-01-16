@@ -126,7 +126,7 @@ def navier_stokes_rk_updated(
   dt = time_step
   explicit_terms = tree_math.unwrap(equation.explicit_terms) # explicit update function, takes velocity (tuple[GridVariable]) as input
   pressure_projection = tree_math.unwrap(equation.pressure_projection) #takes velocity and pressure and returns updated velocity and pressure
-  #IBM = tree_math.unwrap(equation.IBM_force)
+
   IBM = equation.IBM_force
   Grad_Pressure = tree_math.unwrap(equation.Pressure_Grad)
 
@@ -137,7 +137,7 @@ def navier_stokes_rk_updated(
   def step_fn(all_variables: All_Variables):
     u = [None] * num_steps
     k = [None] * num_steps
-    time_stamp = all_variables.velocity[1].bc.time_stamp # TODO (mganahl): improve keeping way of time
+    time_stamp = all_variables.velocity[1].bc.time_stamp # TODO (mganahl): improve time tracking
     def pressure_gradient_to_GridVariable(pressure_gradient,bcs):
         """
         unwrap pressure_gradient (tm.Vector[tuple[GridArray, GridArray]]
@@ -167,7 +167,7 @@ def navier_stokes_rk_updated(
 
     Force = tree_math.Vector(IBM(u_star.tree, time_stamp, dt))
     u_star_star = u_star + dt * Force
-    
+
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
 
     updated_variables = All_Variables(u_final,new_pressure, all_variables.Drag, all_variables.Step_count + 1,all_variables.MD_var)

@@ -60,12 +60,15 @@ def navier_stokes_explicit_terms(
     """
     return tuple(diffuse(u, *args) for u in v)
 
-  convection = _wrap_term_as_vector(convect, name='convection')
-  diffusion_ = _wrap_term_as_vector(diffuse_velocity, name='diffusion')
+  # convection = _wrap_term_as_vector(convect, name='convection')
+  # diffusion_ = _wrap_term_as_vector(diffuse_velocity, name='diffusion')
+  convection = convect
+  diffusion_ = diffuse_velocity
+
   if forcing is not None:
     forcing = _wrap_term_as_vector(forcing, name='forcing')
 
-  @tree_math.wrap
+  #@tree_math.wrap
   @functools.partial(jax.named_call, name='navier_stokes_momentum')
   def _explicit_terms(v:GridVariable):
     """ v is the velocity field, i.e. x-, y- and z-components.

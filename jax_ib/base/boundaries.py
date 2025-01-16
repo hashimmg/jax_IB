@@ -113,7 +113,8 @@ class ConstantBoundaryConditions(BoundaryConditions):
       A copy of `u`, shifted by `offset`. The returned `GridArray` has offset
       `u.offset + offset`.
     """
-    padded = self._pad(u, offset, axis)
+
+    padded = self._pad(u, offset, axis) # mganahl: why not use simply jnp.roll for periodic boundary conditions?
     trimmed = self._trim(padded, -offset, axis)
     return trimmed
 
@@ -866,5 +867,31 @@ def new_periodic_boundary_conditions(
              (BCType.PERIODIC, BCType.PERIODIC))
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
+
+  return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
+
+def dirichlet_boundary_conditions(
+    ndim: int,
+    bc_vals: Optional[Sequence[Tuple[float, float]]],
+    time_stamp: Optional[float],
+    bc_fn: Callable[...,Optional[float]],
+
+) -> ConstantBoundaryConditions:
+  """Returns BCs periodic for dimension 0 and Dirichlet for dimension 1.
+
+  Args:
+    ndim: spatial dimension.
+    bc_fn: function describing the time dependent boundary condition
+    bc_vals: A tuple of lower and upper boundary values for each dimension.
+      If None, returns Homogeneous BC. For periodic dimensions the lower, upper
+      boundary values should be (None, None).
+
+  Returns:
+    BoundaryCondition instance.
+  """
+  bc_type = ((BCType.DIRICHLET, BCType.DIRICHLET),
+             (BCType.DIRICHLET, BCType.DIRICHLET))
+  for _ in range(ndim - 2):
+    bc_type += ((BCType.DIRICHLET, BCType.DIRICHLET),)
 
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)

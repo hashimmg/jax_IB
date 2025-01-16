@@ -49,12 +49,12 @@ def _linear_along_axis(c: GridVariable,
 
   # If offsets differ by an integer, we can just shift `c`.
   if int(offset_delta) == offset_delta:
+
     return grids.GridVariable(
         array=grids.GridArray(data=c.shift(int(offset_delta), axis).data,
                               offset=new_offset,
                               grid=c.grid),
         bc=c.bc)
-
   floor = int(np.floor(offset_delta))
   ceil = int(np.ceil(offset_delta))
   floor_weight = ceil - offset_delta
