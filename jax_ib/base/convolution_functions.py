@@ -18,6 +18,15 @@ def gaussian(x: jax.Array,mu: jax.Array,sigma:jax.Array)->float:
     return 1/(sigma*jnp.sqrt(2*jnp.pi))*jnp.exp(-0.5*((x-mu)/sigma)**2)
 
 
+def mesh_convolve(field:GridVariable,
+                  xp:jax.Array,
+                  yp:jax.Array,
+                  dirac_delta_approx: callable, axis_names:list[str]) -> jax.Array:
+    local_conv = convolve(field, xp, yp, dirac_delta_approx)
+    return jax.lax.psum(
+      jax.lax.psum(local_conv, axis_name = axis_names[0]),
+      axis_name = axis_names[1])
+
 
 # TODO: the dirac delta function should be removed as input
 @jax.tree_util.Partial(jax.vmap, in_axes=(None, 0,0, None))

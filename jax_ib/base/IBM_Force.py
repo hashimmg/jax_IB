@@ -103,7 +103,7 @@ def immersed_boundary_force_per_particle(
     velocity_field: tuple[GridVariable, GridVariable],
     particle: callable,
     dirac_delta_approx: callable,
-    surface_fn: callable,
+    surface_velocity: callable,
     t: float,
     dt:float)->jax.Array:
     """
@@ -118,7 +118,7 @@ def immersed_boundary_force_per_particle(
       particle: Callable computing the particle geometry at time `t`. Signature is `x, y = particle(t)`. The particle
         is represented as a point cloud `x, y`. The function has to be jax differentiable w.r.t. `t`.
       dirac_delta_approx: Approximation to the delta function
-      surface_fn: Callable which computes the surface-integral `sum_{i,j} data[i,j] delta(x[i]-xp]) delta(y[j]-yp)  dx  dy)`
+      surface_velocity: Callable which computes the surface-integral `sum_{i,j} data[i,j] delta(x[i]-xp]) delta(y[j]-yp)  dx  dy)`
         for field.data
       t: The time.
       dt: The time step.
@@ -134,8 +134,8 @@ def immersed_boundary_force_per_particle(
     xp, yp = particle(t)
     UPx, UPy = jax.jacrev(particle)(t)
 
-    ux_at_surface = surface_fn(ux,xp,yp)
-    uy_at_surface = surface_fn(uy,xp,yp)
+    ux_at_surface = surface_velocity(ux,xp,yp)
+    uy_at_surface = surface_velocity(uy,xp,yp)
 
     forcex = (UPx - ux_at_surface)/dt
     forcey = (UPy - uy_at_surface)/dt
@@ -146,14 +146,15 @@ def immersed_boundary_force_per_particle(
     dyL = y_i-yp
     dS = jnp.sqrt(dxL**2 + dyL**2)
 
+
     def calc_force(F,xp,yp,dss):
         return F * dirac_delta_approx(jnp.sqrt((xp-X)**2 + (yp-Y)**2),0,dx)*dss
         #return F*dirac_delta_approx(xp-X,0,dx)*dirac_delta_approx(yp-Y,0,dy)*dss
         #return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2
 
     vmapped_calc_force = jax.vmap(calc_force, in_axes=0)
-    out = jnp.sum(vmapped_calc_force(forcex, xp, yp, dS), axis=0), jnp.sum(vmapped_calc_force(forcey, xp, yp, dS), axis=0)
-    return out
+    # TODO (mganahl): the two vmap calls can be done in parallel as well
+    return jnp.sum(vmapped_calc_force(forcex, xp, yp, dS), axis=0), jnp.sum(vmapped_calc_force(forcey, xp, yp, dS), axis=0)
 
 
 
@@ -184,11 +185,10 @@ def immersed_boundary_force(velocity_field: tuple[GridVariable, GridVariable],
     Returns:
       tuple[GridVariable]: The total force field, i.e. x- and y-components of the force acting on the fluid velocities vx and vy,
         originating from all immersed objects. Each force Fx and Fy is defined on the same grid as vx and vy, respectively,
-
-
     """
     forcex = jnp.zeros_like(velocity_field[0].data)
     forcey = jnp.zeros_like(velocity_field[1].data)
+
     # run over all particles; the final force is the sum of all individual forces per particle
     for particle in particles:
         per_object_forcex, per_object_forcey = immersed_boundary_force_per_particle(
