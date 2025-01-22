@@ -10,13 +10,12 @@ from jax_ib.base import advection
 from jax_ib.base import diffusion
 from jax_ib.base import grids
 from jax_ib.base import pressure
-from jax_cfd.base import pressure as pressureCFD
 from jax_ib.base import time_stepping
 from jax_ib.base import boundaries
 from jax_ib.base import finite_differences
 import tree_math
 from jax_ib.base import particle_class
-from jax_cfd.base import equations as equationsCFD
+
 
 GridArray = grids.GridArray
 GridArrayVector = grids.GridArrayVector
@@ -61,12 +60,15 @@ def navier_stokes_explicit_terms(
     """
     return tuple(diffuse(u, *args) for u in v)
 
-  convection = _wrap_term_as_vector(convect, name='convection')
-  diffusion_ = _wrap_term_as_vector(diffuse_velocity, name='diffusion')
+  # convection = _wrap_term_as_vector(convect, name='convection')
+  # diffusion_ = _wrap_term_as_vector(diffuse_velocity, name='diffusion')
+  convection = convect
+  diffusion_ = diffuse_velocity
+
   if forcing is not None:
     forcing = _wrap_term_as_vector(forcing, name='forcing')
 
-  @tree_math.wrap
+  #@tree_math.wrap
   @functools.partial(jax.named_call, name='navier_stokes_momentum')
   def _explicit_terms(v:GridVariable):
     """ v is the velocity field, i.e. x-, y- and z-components.
@@ -127,15 +129,15 @@ def explicit_IBM_Force(
     step_time: float,
 ) -> Callable[[GridVariableVector], GridVariableVector]:
 
-   def IBM_FORCE(v, *args):
-    return cal_IBM_force(v, *args)
+   def IBM_FORCE(v, t, *args):
+    return cal_IBM_force(v, t, *args)
    IBM_FORCE_ = _wrap_term_as_vector(IBM_FORCE, name='IBM_FORCE')
 
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
-   def _IBM_FORCE(v):
+   def _IBM_FORCE(v, t):
 
-       return IBM_FORCE_(v,step_time)
+       return IBM_FORCE_(v,t, step_time)
 
    return _IBM_FORCE
 
@@ -196,7 +198,7 @@ def semi_implicit_navier_stokes_timeBC(
     grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
-    pressure_solve: Callable = pressureCFD.solve_fast_diag,
+    pressure_solve: Callable = pressure.solve_fast_diag,
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_updated,
     IBM_forcing: IBMFn=None,
@@ -219,8 +221,8 @@ def semi_implicit_navier_stokes_timeBC(
   pressure_projection = jax.named_call(pressure.projection_and_update_pressure, name='pressure')
   Reserve_BC = explicit_Reserve_BC(ReserveBC = boundaries.Reserve_BC,step_time = dt)
   update_BC = explicit_update_BC(updateBC = boundaries.update_BC,step_time = dt)
-  IBM_force = explicit_IBM_Force(cal_IBM_force = IBM_forcing,step_time = dt)
-  Update_Position =  explicit_Update_position(cal_Update_Position = Updating_Position,step_time = dt)
+  #IBM_force = explicit_IBM_Force(cal_IBM_force = IBM_forcing, step_time = dt)
+  IBM_force = IBM_forcing
   Pressure_Grad =  explicit_Pressure_Gradient(cal_Pressure_Grad = Pressure_Grad)
   Calculate_Drag =  explicit_Calc_Drag(cal_Drag = Drag_fn,step_time = dt)
   #jax.named_call(boundaries.update_BC, name='Update_BC')
@@ -228,12 +230,10 @@ def semi_implicit_navier_stokes_timeBC(
   # advection/diffusion are staggered in time.
   ode = time_stepping.ExplicitNavierStokesODE_BCtime(
       explicit_terms,
-      #lambda v: pressure_projection(v, pressure_solve), 
       lambda v,p: pressure_projection(v, p, pressure_solve),
       update_BC,
       Reserve_BC,
       IBM_force,
-      Update_Position,
       Pressure_Grad,
       Calculate_Drag,
   )
@@ -248,7 +248,7 @@ def semi_implicit_navier_stokes_penalty(
     grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
-    pressure_solve: Callable = pressureCFD.solve_fast_diag,
+    pressure_solve: Callable = pressure.solve_fast_diag,
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_penalty,
 ) -> Callable[[GridVariableVector], GridVariableVector]:

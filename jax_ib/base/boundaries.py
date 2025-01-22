@@ -113,7 +113,8 @@ class ConstantBoundaryConditions(BoundaryConditions):
       A copy of `u`, shifted by `offset`. The returned `GridArray` has offset
       `u.offset + offset`.
     """
-    padded = self._pad(u, offset, axis)
+
+    padded = self._pad(u, offset, axis) # mganahl: why not use simply jnp.roll for periodic boundary conditions?
     trimmed = self._trim(padded, -offset, axis)
     return trimmed
 
@@ -506,7 +507,6 @@ def update_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_
 
 def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, time_stamp_2) -> particle_class.All_Variables:
     v = all_variable.velocity
-    particles = all_variable.particles
     pressure = all_variable.pressure
     Drag = all_variable.Drag
     Step_count = all_variable.Step_count
@@ -522,7 +522,7 @@ def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, t
 
     v_updated =  tuple(
       grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
-    return particle_class.All_Variables(particles,v_updated,pressure,Drag,Step_count,MD_var)
+    return particle_class.All_Variables(v_updated,pressure,Drag,Step_count,MD_var)
 
 # Convenience utilities to ease updating of BoundaryConditions implementation
 def periodic_boundary_conditions(ndim: int) -> ConstantBoundaryConditions:
@@ -867,5 +867,31 @@ def new_periodic_boundary_conditions(
              (BCType.PERIODIC, BCType.PERIODIC))
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
+
+  return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
+
+def dirichlet_boundary_conditions(
+    ndim: int,
+    bc_vals: Optional[Sequence[Tuple[float, float]]],
+    time_stamp: Optional[float],
+    bc_fn: Callable[...,Optional[float]],
+
+) -> ConstantBoundaryConditions:
+  """Returns BCs periodic for dimension 0 and Dirichlet for dimension 1.
+
+  Args:
+    ndim: spatial dimension.
+    bc_fn: function describing the time dependent boundary condition
+    bc_vals: A tuple of lower and upper boundary values for each dimension.
+      If None, returns Homogeneous BC. For periodic dimensions the lower, upper
+      boundary values should be (None, None).
+
+  Returns:
+    BoundaryCondition instance.
+  """
+  bc_type = ((BCType.DIRICHLET, BCType.DIRICHLET),
+             (BCType.DIRICHLET, BCType.DIRICHLET))
+  for _ in range(ndim - 2):
+    bc_type += ((BCType.DIRICHLET, BCType.DIRICHLET),)
 
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)

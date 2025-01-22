@@ -54,13 +54,12 @@ class ExplicitNavierStokesODE_BCtime:
     0 = incompressibility_constraint(u)
   """
 
-  def __init__(self, explicit_terms, pressure_projection,update_BC,Reserve_BC,IBM_force,Update_Position,Pressure_Grad,Calculate_Drag):
+  def __init__(self, explicit_terms, pressure_projection,update_BC,Reserve_BC,IBM_force,Pressure_Grad,Calculate_Drag):
     self.explicit_terms = explicit_terms
     self.pressure_projection = pressure_projection
     self.update_BC = update_BC
     self.Reserve_BC = Reserve_BC
     self.IBM_force = IBM_force
-    self.Update_Position = Update_Position
     self.Pressure_Grad = Pressure_Grad
     self.Calculate_Drag = Calculate_Drag
 
@@ -80,10 +79,6 @@ class ExplicitNavierStokesODE_BCtime:
     """Revert spurious updates of Wall BC """
     raise NotImplementedError
   def IBM_force(self, state):
-    """Revert spurious updates of Wall BC """
-    raise NotImplementedError
-
-  def Update_Position(self, state):
     """Revert spurious updates of Wall BC """
     raise NotImplementedError
 
@@ -131,7 +126,8 @@ def navier_stokes_rk_updated(
   dt = time_step
   explicit_terms = tree_math.unwrap(equation.explicit_terms) # explicit update function, takes velocity (tuple[GridVariable]) as input
   pressure_projection = tree_math.unwrap(equation.pressure_projection) #takes velocity and pressure and returns updated velocity and pressure
-  IBM = tree_math.unwrap(equation.IBM_force)
+
+  IBM = equation.IBM_force
   Grad_Pressure = tree_math.unwrap(equation.Pressure_Grad)
 
   a = tableau.a
@@ -141,7 +137,7 @@ def navier_stokes_rk_updated(
   def step_fn(all_variables: All_Variables):
     u = [None] * num_steps
     k = [None] * num_steps
-    time_stamp = all_variables.velocity[1].bc.time_stamp
+    time_stamp = all_variables.velocity[1].bc.time_stamp # TODO (mganahl): improve time tracking
     def pressure_gradient_to_GridVariable(pressure_gradient,bcs):
         """
         unwrap pressure_gradient (tm.Vector[tuple[GridArray, GridArray]]
@@ -149,13 +145,8 @@ def navier_stokes_rk_updated(
         """
         return tree_math.Vector(tuple(grids.GridVariable(dp,bc) for dp,bc in zip(pressure_gradient.tree,bcs)))
 
-
-    particles = all_variables.particles
     ubc = tuple([v.bc for v in all_variables.velocity])
     pressure = tree_math.Vector(all_variables.pressure)
-    Drag = all_variables.Drag
-    Step_count = all_variables.Step_count
-    MD_var = all_variables.MD_var
 
     velocity_field = tree_math.Vector(all_variables.velocity) # all_variables.velocity is type tuple[GridVariable, GridVariable]
     u[0] = velocity_field
@@ -169,142 +160,23 @@ def navier_stokes_rk_updated(
       u[i] = tree_math.Vector(u_temp)
       k[i] = explicit_terms(u[i])
 
+    # mganahl: why is dP below not multiplied by dt?
     u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it back
     u_star.tree[0].bc.time_stamp = time_stamp
     u_star.tree[1].bc.time_stamp = time_stamp
 
-    Force = IBM(tree_math.Vector((u_star.tree, particles)))
+    Force = tree_math.Vector(IBM(u_star.tree, time_stamp, dt))
     u_star_star = u_star + dt * Force
+
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
 
-    updated_variables = All_Variables(particles,u_final,new_pressure,Drag,Step_count,MD_var)
-    updated_variables = equation.update_BC(updated_variables)
-    updated_variables = equation.Update_Position(updated_variables) # the time step counter is also updated
+    updated_variables = All_Variables(u_final,new_pressure, all_variables.Drag, all_variables.Step_count + 1,all_variables.MD_var)
+    updated_variables = equation.update_BC(updated_variables) # boundary conditions may be time dependent
+
     return updated_variables
-  return step_fn
-
-
-def step_fn(pressure, velocity):
-  pass
-
-
-def navier_stokes_rk_updated_deprecated(
-    tableau: ButcherTableau_updated,
-    equation: ExplicitNavierStokesODE_BCtime,
-    time_step: float,
-) -> TimeStepFn:
-  """
-  Deprecated
-  Create a forward Runge-Kutta time-stepper for incompressible Navier-Stokes.
-
-  This function implements the reference method (equations 16-21), rather than
-  the fast projection method, from:
-    "Fast-Projection Methods for the Incompressible Navier–Stokes Equations"
-    Fluids 2020, 5, 222; doi:10.3390/fluids5040222
-
-  Args:
-    tableau: Butcher tableau.
-    equation: equation to use.
-    time_step: overall time-step size.
-
-  Returns:
-    Function that advances one time-step forward.
-  """
-  # pylint: disable=invalid-name
-  dt = time_step
-  F = tree_math.unwrap(equation.explicit_terms)
-  P = tree_math.unwrap(equation.pressure_projection)
-  M = tree_math.unwrap(equation.update_BC)
-  R = tree_math.unwrap(equation.Reserve_BC)
-  IBM = tree_math.unwrap(equation.IBM_force)
-  Update_Pos = tree_math.unwrap(equation.Update_Position)
-  Grad_Pressure = tree_math.unwrap(equation.Pressure_Grad)
-  Drag_Calculation = tree_math.unwrap(equation.Calculate_Drag)
-
-  a = tableau.a
-  b = tableau.b
-  num_steps = len(b)
-
-  @tree_math.wrap
-  def step_fn(all_variables: All_Variables):
-    u = [None] * num_steps
-    k = [None] * num_steps
-    def convert_to_velocity_vector(u0):
-        return tree_math.Vector(tuple(v.array for v in u0.tree))
-
-    def convert_to_velocity_tree(m,bcs):
-        return tree_math.Vector(tuple(grids.GridVariable(v,bc) for v,bc in zip(m.tree,bcs)))
-
-    def convert_all_variabl_to_velocity_vecot(variables):
-        return  tree_math.Vector(variables.tree.velocity)
-
-    def covert_veloicty_to_All_variable_vecot(particles,m,pressure,Drag,Step_count,MD_var):
-        u = m.tree
-        return tree_math.Vector(particle_class.All_Variables(particles,u,pressure,Drag,Step_count,MD_var))
-
-
-    particles = all_variables.tree.particles
-    ubc = tuple([v.bc for v in all_variables.tree.velocity])
-    pressure = all_variables.tree.pressure
-    Drag = all_variables.tree.Drag
-    Step_count = all_variables.tree.Step_count
-    MD_var = all_variables.tree.MD_var
-
-
-    u0 = convert_all_variabl_to_velocity_vecot(all_variables)
-    u[0] = convert_to_velocity_vector(u0)
-    k[0] = convert_to_velocity_vector(F(u0))
-    dP = Grad_Pressure(tree_math.Vector(pressure))
-
-    u0 = convert_to_velocity_vector(u0)
-
-    for i in range(1, num_steps):
-        #u_star = u0[ww].array + sum(a[i-1][j]*k[j][ww].array for j in range(i) if a[i-1][j])
-
-      u_star = u0 + dt * sum(a[i-1][j] * k[j] for j in range(i) if a[i-1][j])
-
-      #u[i] = P(R(u_star))
-      u[i] = convert_to_velocity_vector(P(convert_to_velocity_tree(u_star,ubc)))
-      k[i] = convert_to_velocity_vector(F(convert_to_velocity_tree(u[i],ubc)))
-
-    #for ww in range(0,len(u0)):
-    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP
-
-    Force = IBM(covert_veloicty_to_All_variable_vecot(particles,convert_to_velocity_tree(u_star,ubc),pressure,Drag,Step_count,MD_var))
-
-
-    Drag_variable = Drag_Calculation(covert_veloicty_to_All_variable_vecot(particles,Force,pressure,Drag,Step_count,MD_var))
-    Drag = Drag_variable.tree.Drag
-
-
-    Force = convert_to_velocity_vector(Force)
-
-    #Tree_force =  convert_to_velocity_tree(Force,ubc)
-
-    u_star_star = u_star + dt * Force
-
-   # for i in range(0,2):
-   #     Force = IBM(covert_veloicty_to_All_variable_vecot(particles,convert_to_velocity_tree(u_star_star,ubc),pressure,Drag))
-   #     if i==1:
-   #         Drag_variable = Drag_Calculation(covert_veloicty_to_All_variable_vecot(particles,Force,pressure,Drag))
-   #         Drag = the_Drag(Drag_variable)
-   #     Force = convert_to_velocity_vector(Force)
-   #     u_star_star = u_star+ dt * Force
-    #u_final = P(R(u_star))
-    #u_final = P(Force)
-
-    u_final = convert_to_velocity_tree(u_star_star,ubc)
-
-    u_final = covert_veloicty_to_All_variable_vecot(particles,u_final,pressure,Drag,Step_count,MD_var)
-    u_final = P(u_final)
-    #u_final = P(u_star_star)
-    u_final = M(u_final)
-    u_final = tree_math.Vector(equation.Update_Position(u_final.tree)) # the time step counter is also updated
-
-    #u_final = Update_Pos(u_final) # the time step counter is also updated    
-    return u_final
 
   return step_fn
+
 
 def navier_stokes_rk_penalty(
     tableau: ButcherTableau_updated,
@@ -326,6 +198,7 @@ def navier_stokes_rk_penalty(
   Returns:
     Function that advances one time-step forward.
   """
+  raise NotImplementedError("Currenty not implemented")
   # pylint: disable=invalid-name
   dt = time_step
   F = tree_math.unwrap(equation.explicit_terms)
