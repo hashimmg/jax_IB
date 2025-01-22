@@ -37,6 +37,10 @@ class BCType:
   DIRICHLET = 'dirichlet'
   NEUMANN = 'neumann'
 
+
+# TODO: the code currently abuses ConstantBoundaryConditions to be time dependent.
+# A better approach would be defining a new class of boundary conditions constant
+# in space, but variable in time.
 @register_pytree_node_class
 @dataclasses.dataclass(init=False, frozen=False)
 class ConstantBoundaryConditions(BoundaryConditions):
@@ -64,13 +68,13 @@ class ConstantBoundaryConditions(BoundaryConditions):
     values = tuple(values)
     boundary_fn = boundary_fn
     time_stamp = time_stamp
-    
+
     object.__setattr__(self, 'bc_values', values)
     object.__setattr__(self, 'boundary_fn', boundary_fn)
     object.__setattr__(self, 'time_stamp', time_stamp if time_stamp is not None else [])
     object.__setattr__(self, 'types', types)
     #if boundary_fn or not boundary_fn:
-      
+
     #else:
     #  object.__setattr__(self, 'boundary_fn', None)
     # object.__setattr__(self, 'time_stamp', None)
@@ -90,7 +94,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
 
   def update_bc_(self,time_stamp: float, dt: float):
     return time_stamp + dt
-       
+
 
   def shift(
       self,
@@ -468,7 +472,6 @@ class TimeDependentBoundaryConditions(ConstantBoundaryConditions):
 
     #ndim = len(types)
     #values = ((0.0, 0.0),) * ndim
-    
     super(TimeDependentBoundaryConditions, self).__init__(types, values,boundary_fn,time_stamp)
 
   def tree_flatten(self):
@@ -487,9 +490,21 @@ def boundary_function(t):
   A=1
   B = 1
   freq = 1
-  return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))    
+  return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))
 
-def Reserve_BC(all_variable: particle_class.All_Variables,step_time: float) -> particle_class.All_Variables:
+def Reserve_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_class.All_Variables:
+    v = all_variable.velocity
+    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+
+    return _boundary_update(all_variable, ts, 0.0)
+
+def update_BC(all_variable: particle_class.All_Variables,dt: float) -> particle_class.All_Variables:
+    v = all_variable.velocity
+    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+    out= _boundary_update(all_variable, ts, ts)
+    return out
+
+def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, time_stamp_2) -> particle_class.All_Variables:
     v = all_variable.velocity
     particles = all_variable.particles
     pressure = all_variable.pressure
@@ -498,46 +513,14 @@ def Reserve_BC(all_variable: particle_class.All_Variables,step_time: float) -> p
     MD_var = all_variable.MD_var
     bcfn = v[0].bc.boundary_fn
     bcfny = v[1].bc.boundary_fn
-    
-    dt = step_time
-    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
-    #ts = dt
-    vx_bc = ((bcfn[0](ts),bcfn[1](0.0)),(bcfn[2](ts),bcfn[3](0.0)))
-    vy_bc = ((bcfny[0](ts),bcfny[1](0.0)),(bcfny[2](ts),bcfny[3](0.0)))
-    #vel_bc =(Moving_wall_boundary_conditions(ndim=2,bc_vals=vx_bc,time_stamp=ts,bc_fn=bcfn),Moving_wall_boundary_conditions(ndim=2,bc_vals=vy_bc,time_stamp=ts,bc_fn=bcfn))
-    vel_bc = (ConstantBoundaryConditions(values=vx_bc,time_stamp=ts,types=v[0].bc.types,boundary_fn=bcfn),
-              ConstantBoundaryConditions(values=vy_bc,time_stamp=ts,types=v[1].bc.types,boundary_fn=bcfny))
-    #return v
-    #return tuple(grids.GridVariable(u.array, u.bc) for u in v)
-   
-    v_updated =  tuple(     
-      grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
-    return particle_class.All_Variables(particles,v_updated,pressure,Drag,Step_count,MD_var)
-  
 
+    vx_bc = ((bcfn[0](time_stamp_1),bcfn[1](time_stamp_2)),(bcfn[2](time_stamp_1),bcfn[3](time_stamp_2)))
+    vy_bc = ((bcfny[0](time_stamp_1),bcfny[1](time_stamp_2)),(bcfny[2](time_stamp_1),bcfny[3](time_stamp_2)))
 
-def update_BC(all_variable: particle_class.All_Variables,step_time: float) -> particle_class.All_Variables:
-    v = all_variable.velocity
-    particles = all_variable.particles
-    pressure = all_variable.pressure
-    Drag = all_variable.Drag
-    Step_count = all_variable.Step_count
-    MD_var = all_variable.MD_var
-    bcfn = v[0].bc.boundary_fn
-    bcfny = v[1].bc.boundary_fn
-    
-    dt = step_time
-    ts = v[0].bc.time_stamp + dt# v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
-    #ts = dt
-    vx_bc = ((bcfn[0](ts),bcfn[1](ts)),(bcfn[2](ts),bcfn[3](ts)))
-    vy_bc = ((bcfny[0](ts),bcfny[1](ts)),(bcfny[2](ts),bcfny[3](ts)))
-    #vel_bc =(Moving_wall_boundary_conditions(ndim=2,bc_vals=vx_bc,time_stamp=ts,bc_fn=bcfn),Moving_wall_boundary_conditions(ndim=2,bc_vals=vy_bc,time_stamp=ts,bc_fn=bcfn))
-    vel_bc = (ConstantBoundaryConditions(values=vx_bc,time_stamp=ts,types=v[0].bc.types,boundary_fn=bcfn),
-              ConstantBoundaryConditions(values=vy_bc,time_stamp=ts,types=v[1].bc.types,boundary_fn=bcfny))
-    #return v
-    #return tuple(grids.GridVariable(u.array, u.bc) for u in v)
-   
-    v_updated =  tuple(     
+    vel_bc = (ConstantBoundaryConditions(values=vx_bc,time_stamp=time_stamp_1,types=v[0].bc.types,boundary_fn=bcfn),
+              ConstantBoundaryConditions(values=vy_bc,time_stamp=time_stamp_1,types=v[1].bc.types,boundary_fn=bcfny))
+
+    v_updated =  tuple(
       grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
     return particle_class.All_Variables(particles,v_updated,pressure,Drag,Step_count,MD_var)
 
@@ -657,16 +640,13 @@ def Moving_wall_boundary_conditions(
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
 
-  
-    
-
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
 
 
 def Far_field_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],    
+    time_stamp: Optional[float],
     bc_fn: Callable[...,Optional[float]],
 
 ) -> ConstantBoundaryConditions:
@@ -686,9 +666,6 @@ def Far_field_boundary_conditions(
              (BCType.DIRICHLET, BCType.DIRICHLET))
   for _ in range(ndim - 2):
     bc_type += ((BCType.DIRICHLET, BCType.DIRICHLET),)
-
-  
-    
 
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
 
@@ -800,13 +777,31 @@ def get_pressure_bc_from_velocity(v: GridVariableVector) -> BoundaryConditions:
   velocity_bc_types = consistent_boundary_conditions(*v)
   pressure_bc_types = []
   bc_value = ((0.0,0.0),(0.0,0.0))
-  Bc_f = v[0].bc.boundary_fn
+  Bc_f = v[0].bc.boundary_fn #mganahl: this is quite strange to do, but changing it breaks the code currently; this needs to be cleaned up
   for velocity_bc_type in velocity_bc_types:
     if velocity_bc_type == 'periodic':
       pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
     else:
       pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
-  return ConstantBoundaryConditions(values=bc_value,time_stamp=2.0,types=pressure_bc_types,boundary_fn=Bc_f) 
+  # mganahl: why time_stamp=2.0???
+  return ConstantBoundaryConditions(values=bc_value,time_stamp=2.0,types=pressure_bc_types,boundary_fn=Bc_f)
+
+def get_pressure_bc_from_velocity_deprecated(v: GridVariableVector,
+                                  boundary_fn) -> ConstantBoundaryConditions:
+  """Returns pressure boundary conditions for the specified velocity variables.
+  Assumes 2d geometry"""
+  # assumes that if the boundary is not periodic, pressure BC is zero flux.
+  # TODO: this is not particularly clean, need to improve
+  velocity_bc_types = consistent_boundary_conditions(*v)
+  pressure_bc_types = []
+  for velocity_bc_type in velocity_bc_types:
+    if velocity_bc_type == 'periodic':
+      pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
+    else:
+      pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
+  # mganahl: why time_stamp=2.0???
+  bc_value = ((0.0,0.0),(0.0,0.0))
+  return ConstantBoundaryConditions(values=bc_value,time_stamp=2.0,types=pressure_bc_types,boundary_fn=boundary_fn)
 
 
 
@@ -852,7 +847,7 @@ def get_advection_flux_bc_from_velocity_and_scalar(
 def new_periodic_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],    
+    time_stamp: Optional[float],
     bc_fn: Callable[...,Optional[float]],
 
 ) -> ConstantBoundaryConditions:
@@ -872,8 +867,5 @@ def new_periodic_boundary_conditions(
              (BCType.PERIODIC, BCType.PERIODIC))
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
-
-  
-    
 
   return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)

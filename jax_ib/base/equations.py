@@ -47,17 +47,18 @@ def navier_stokes_explicit_terms(
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
     forcing: Optional[ForcingFn] = None,
-    
 ) -> Callable[[GridVariableVector], GridVariableVector]:
   """Returns a function that performs a time step of Navier Stokes."""
   del grid  # unused
 
   if convect is None:
-    def convect(v):  # pylint: disable=function-redefined
+    def convect(v:tuple[GridVariable]):  # pylint: disable=function-redefined
       return tuple(
           advection.advect_van_leer_using_limiters(u, v, dt) for u in v)
 
-  def diffuse_velocity(v, *args):
+  def diffuse_velocity(v: tuple[GridVariable], *args):
+    """ v is the velocity field, i.e. x-, y- and z-components.
+    """
     return tuple(diffuse(u, *args) for u in v)
 
   convection = _wrap_term_as_vector(convect, name='convection')
@@ -67,22 +68,24 @@ def navier_stokes_explicit_terms(
 
   @tree_math.wrap
   @functools.partial(jax.named_call, name='navier_stokes_momentum')
-  def _explicit_terms(v):
+  def _explicit_terms(v:GridVariable):
+    """ v is the velocity field, i.e. x-, y- and z-components.
+    """
     dv_dt = convection(v)
     if viscosity is not None:
       dv_dt += diffusion_(v, viscosity / density)
     if forcing is not None:
       dv_dt += forcing(v) / density
-    
+
     return dv_dt
 
-  def explicit_terms_with_same_bcs(v):
+  def explicit_terms_with_same_bcs(v:tuple[GridVariable]):
+    """ v is the velocity field, i.e. x-, y- and z-components.
+    """
     dv_dt = _explicit_terms(v)
     return tuple(grids.GridVariable(a, u.bc) for a, u in zip(dv_dt, v))
 
   return explicit_terms_with_same_bcs
-
-
 
 
 
@@ -94,11 +97,10 @@ def explicit_Reserve_BC(
    def Reserve_boundary(v, *args):
     return ReserveBC(v, *args)
    Reserve_bc_ = _wrap_term_as_vector(Reserve_boundary, name='Reserve_BC')
-   
+
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
    def _Reserve_bc(v):
-       
        return Reserve_bc_(v,step_time)
 
    return _Reserve_bc
@@ -111,11 +113,10 @@ def explicit_update_BC(
    def Update_boundary(v, *args):
     return updateBC(v, *args)
    Update_bc_ = _wrap_term_as_vector(Update_boundary, name='Update_BC')
-   
+
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
    def _Update_bc(v):
-       
        return Update_bc_(v,step_time)
 
    return _Update_bc
@@ -129,11 +130,11 @@ def explicit_IBM_Force(
    def IBM_FORCE(v, *args):
     return cal_IBM_force(v, *args)
    IBM_FORCE_ = _wrap_term_as_vector(IBM_FORCE, name='IBM_FORCE')
-   
+
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
    def _IBM_FORCE(v):
-       
+
        return IBM_FORCE_(v,step_time)
 
    return _IBM_FORCE
@@ -148,11 +149,10 @@ def explicit_Update_position(
    def Update_Position(v, *args):
     return cal_Update_Position(v, *args)
    Update_Position_ = _wrap_term_as_vector(Update_Position, name='Update_Position')
-   
+
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
    def _Update_Position(v):
-       
        return Update_Position_(v,step_time)
 
    return _Update_Position
@@ -166,11 +166,10 @@ def explicit_Calc_Drag(
    def Calculate_Drag(v, *args):
     return cal_Drag(v, *args)
    Calculate_Drag_ = _wrap_term_as_vector(Calculate_Drag, name='Calculate_Drag')
-   
+
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
    def _Calculate_Drag(v):
-       
        return Calculate_Drag_(v,step_time)
 
    return _Calculate_Drag
@@ -182,11 +181,10 @@ def explicit_Pressure_Gradient(
    def Pressure_Grad(v):
     return cal_Pressure_Grad(v)
    Pressure_Grad_ = _wrap_term_as_vector(Pressure_Grad, name='Pressure_Grad')
-   
+
    @tree_math.wrap
   # @functools.partial(jax.named_call, name='master_BC_fn')
    def _Pressure_Grad(v):
-       
        return Pressure_Grad_(v)
 
    return _Pressure_Grad
@@ -205,10 +203,10 @@ def semi_implicit_navier_stokes_timeBC(
     Updating_Position:PosFn=None ,
     Pressure_Grad:GradPFn=finite_differences.forward_difference,
     Drag_fn:DragFn=None,
-    
 ) -> Callable[[GridVariableVector], GridVariableVector]:
   """Returns a function that performs a time step of Navier Stokes."""
 
+  # momentum updates
   explicit_terms = navier_stokes_explicit_terms(
       density=density,
       viscosity=viscosity,
@@ -230,7 +228,8 @@ def semi_implicit_navier_stokes_timeBC(
   # advection/diffusion are staggered in time.
   ode = time_stepping.ExplicitNavierStokesODE_BCtime(
       explicit_terms,
-      lambda v: pressure_projection(v, pressure_solve),
+      #lambda v: pressure_projection(v, pressure_solve), 
+      lambda v,p: pressure_projection(v, p, pressure_solve),
       update_BC,
       Reserve_BC,
       IBM_force,

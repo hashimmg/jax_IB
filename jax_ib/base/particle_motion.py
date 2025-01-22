@@ -30,7 +30,7 @@ def Update_particle_position_Multiple_and_MD_Step(step_fn,all_variables,dt):
     
     MD_var = step_fn(all_variables)
 
-    New_particles = pc.particle(Newparticle_center,param_geometry,displacement_param,rotation_param,mygrids,shape_fn,Displacement_EQ,particles.Rotation_EQ)
+    New_particles = pc.Particle(Newparticle_center,param_geometry,displacement_param,rotation_param,mygrids,shape_fn,Displacement_EQ,particles.Rotation_EQ)
     
     return pc.All_Variables(New_particles,velocity,pressure,Drag,Step_count,MD_var)
     
@@ -46,8 +46,6 @@ def Update_particle_position_Multiple(all_variables,dt):
     New_eq = lambda t:Displacement_EQ(displacement_param,t)
     dx_dt = jax.jacrev(New_eq)
 
-    
-    
     U0 =dx_dt(current_t)
     #print(U0)
     Newparticle_center = jnp.array([particle_centers[:,0]+dt*U0[0],particle_centers[:,1]+dt*U0[1]]).T
@@ -61,6 +59,6 @@ def Update_particle_position_Multiple(all_variables,dt):
     
     MD_var = all_variables.MD_var
 
-    New_particles = pc.particle(Newparticle_center,param_geometry,displacement_param,rotation_param,mygrids,shape_fn,Displacement_EQ,particles.Rotation_EQ)
+    New_particles = pc.Particle(Newparticle_center,param_geometry,displacement_param,rotation_param,mygrids,shape_fn,Displacement_EQ,particles.Rotation_EQ)
     
     return pc.All_Variables(New_particles,velocity,pressure,Drag,Step_count,MD_var)
