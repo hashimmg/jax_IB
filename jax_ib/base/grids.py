@@ -802,7 +802,6 @@ class Grid:
     for i, s in zip(index, mesh_shape):
       if i >= s:
         raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
-    axis_grid_points = [jnp.linspace(*self.domain[n], self.shape[n] + 1) for n in range(self.ndim)]
     sub_domain = []
     subdomain_shape = []
     for n in range(self.ndim):
