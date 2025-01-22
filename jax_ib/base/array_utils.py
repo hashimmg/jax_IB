@@ -167,6 +167,7 @@ def block_reduce(
 
 def laplacian_matrix(size: int, step: float) -> np.ndarray:
   """Create 1D Laplacian operator matrix, with periodic BC."""
+  step = float(step) # mganahl: Grid now uses a jax.Array type for `step`
   column = np.zeros(size)
   column[0] = -2 / step**2
   column[1] = column[-1] = 1 / step**2

@@ -74,8 +74,6 @@ def _advect_aligned(cs: GridVariableVector, v: GridVariableVector) -> GridArray:
   flux = tuple(grids.GridVariable(f, c.bc) for f, c in zip(flux, cs))
   # compute \nabla (c \vec v) which is the same as (\vec v \nabla) c due to div \vec v = 0.???
   # c and v here are interpolated to the same points on the grid
-  # mganahl: it's not entirely clear to me how the offsets of the flux and
-  # the offsets of global velocity field v are related (different from v in this function). 
   return -fd.divergence(flux)
 
 
@@ -118,14 +116,20 @@ def advect_linear(c: GridVariable,
                   v: GridVariableVector,
                   dt: Optional[float] = None) -> GridArray:
   """Computes advection using linear interpolations."""
-  return advect_general(c, v, interpolation.linear, interpolation.linear, dt)
+  return advect_general(c, v,
+                        u_interpolation_fn = interpolation.linear,
+                        c_interpolation_fn = interpolation.linear,
+                        dt = dt)
 
 
 def advect_upwind(c: GridVariable,
                   v: GridVariableVector,
                   dt: Optional[float] = None) -> GridArray:
   """Computes advection using first-order upwind interpolation on `c`."""
-  return advect_general(c, v, interpolation.linear, interpolation.upwind, dt)
+  return advect_general(c, v,
+                        u_interpolation_fn = interpolation.linear,#interpolation.linear,
+                        c_interpolation_fn = interpolation.upwind,
+                        dt = dt)
 
 
 def _align_velocities(v: GridVariableVector) -> Tuple[GridVariableVector]:

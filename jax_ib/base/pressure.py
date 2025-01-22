@@ -1,12 +1,10 @@
-
-
 from typing import Callable, Optional
 import scipy.linalg
 import numpy as np
 from jax_ib.base import array_utils
-from jax_cfd.base import fast_diagonalization
+#from jax_cfd.base import pressure
+from jax_ib.base import fast_diagonalization
 import jax.numpy as jnp
-from jax_cfd.base import pressure
 from jax_ib.base import grids
 from jax_ib.base import boundaries
 from jax_ib.base import finite_differences as fd
@@ -19,15 +17,32 @@ GridVariable = grids.GridVariable
 GridVariableVector = grids.GridVariableVector
 BoundaryConditions = grids.BoundaryConditions
 
+def solve_fast_diag_pinv(
+    v: GridVariableVector,
+    pinv: callable,
+    pressure_bc: Optional[boundaries.ConstantBoundaryConditions] = None,
+) -> grids.GridArray:
+  """Solve for pressure using the fast diagonalization approach.
 
-def laplacian_matrix_neumann(size: int, step: float) -> np.ndarray:
-  """Create 1D Laplacian operator matrix, with homogeneous Neumann BC."""
-  column = np.zeros(size)
-  column[0] = -2 / step ** 2
-  column[1] = 1 / step ** 2
-  matrix = scipy.linalg.toeplitz(column)
-  matrix[0, 0] = matrix[-1, -1] = -1 / step**2
-  return matrix
+  To support backward compatibility, if the pressure_bc are not provided and
+  velocity has all periodic boundaries, pressure_bc are assigned to be periodic.
+
+  Args:
+    v: a tuple of velocity values for each direction.
+    q0: the starting guess for the pressure.
+    pressure_bc: the boundary condition to assign to pressure. If None,
+      boundary condition is infered from velocity.
+    implementation: how to implement fast diagonalization.
+      For non-periodic BCs will automatically be matmul.
+
+  Returns:
+    A solution to the PPE equation.
+  """
+  if pressure_bc is None:
+    pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
+  rhs = fd.divergence(v)
+  rhs_transformed = _rhs_transform(rhs, pressure_bc)
+  return grids.GridArray(pinv(rhs_transformed), rhs.offset, rhs.grid)
 
 
 def _rhs_transform(
@@ -55,10 +70,60 @@ def _rhs_transform(
   return u_data
 
 
+def solve_fast_diag(
+    v: GridVariableVector,
+    q0: Optional[GridVariable] = None,
+    implementation: Optional[str] = None) -> GridArray:
+  """
+  Solve for pressure using the fast diagonalization approach.
+  This version is less general than the one in jax-cfd and works
+  only for periodic boundary conditions.
+  """
+  del q0  # unused
+  if not boundaries.has_all_periodic_boundary_conditions(*v):
+    raise ValueError('solve_fast_diag() expects periodic velocity BC')
+  grid = grids.consistent_grid(*v)
+  rhs = fd.divergence(v)
+  laplacians = list(map(array_utils.laplacian_matrix, grid.shape, grid.step))
+  pinv = fast_diagonalization.pseudoinverse(
+      laplacians, rhs.dtype,
+      hermitian=True, circulant=True, implementation=implementation)
+  return grids.applied(pinv)(rhs)
+
+
+def projection_and_update_pressure_pinv(
+    pressure: GridVariable,
+    velocity: tuple[GridVariable],
+    pinv: callable,
+) -> GridVariableVector:
+  """
+  Apply pressure projection to make a velocity field divergence free.
+  """
+  v = velocity
+  grid = grids.consistent_grid(*v)
+  pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
+
+  qsol = solve_fast_diag_pinv(v, pinv)
+  q = grids.GridVariable(qsol, pressure_bc)
+
+  new_pressure_array =  grids.GridArray(qsol.data + pressure.data,qsol.offset,qsol.grid)
+  new_pressure = grids.GridVariable(new_pressure_array,pressure_bc)
+
+  q_grad = fd.forward_difference(q)
+  if boundaries.has_all_periodic_boundary_conditions(*v):
+    v_projected = tuple(
+        grids.GridVariable(u.array - q_g, u.bc) for u, q_g in zip(v, q_grad))
+  else:
+    v_projected = tuple(
+        grids.GridVariable(u.array - q_g, u.bc).impose_bc()
+        for u, q_g in zip(v, q_grad))
+  return v_projected, new_pressure
+
+
 def projection_and_update_pressure(
     pressure: GridVariable,
     velocity: tuple[GridVariable],
-    solve: Callable = pressure.solve_fast_diag,
+    solve: Callable = solve_fast_diag,
 ) -> GridVariableVector:
   """Apply pressure projection to make a velocity field divergence free."""
   v = velocity
@@ -89,60 +154,6 @@ def projection_and_update_pressure(
         for u, q_g in zip(v, q_grad))
   return v_projected, New_pressure
 
-def projection_and_update_pressure_deprecated(
-    All_variables: particle_class.All_Variables,
-    solve: Callable = pressure.solve_fast_diag,
-) -> GridVariableVector:
-  """Deprecated
-  Apply pressure projection to make a velocity field divergence free."""
-  v = All_variables.velocity
-  old_pressure = All_variables.pressure
-  particles = All_variables.particles
-  Drag =  All_variables.Drag
-  Step_count = All_variables.Step_count
-  MD_var = All_variables.MD_var
-  grid = grids.consistent_grid(*v)
-  pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
-
-  q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid)
-  q0 = grids.GridVariable(q0, pressure_bc)
-
-  qsol = solve(v, q0)
-  q = grids.GridVariable(qsol, pressure_bc)
-
-  New_pressure_Array =  grids.GridArray(qsol.data + old_pressure.data,qsol.offset,qsol.grid)
-  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc)
-
-  q_grad = fd.forward_difference(q)
-  if boundaries.has_all_periodic_boundary_conditions(*v):
-    v_projected = tuple(
-        grids.GridVariable(u.array - q_g, u.bc) for u, q_g in zip(v, q_grad))
-    new_variable = particle_class.All_Variables(particles,v_projected,New_pressure,Drag,Step_count,MD_var)
-  else:
-    v_projected = tuple(
-        grids.GridVariable(u.array - q_g, u.bc).impose_bc()
-        for u, q_g in zip(v, q_grad))
-    new_variable = particle_class.All_Variables(particles,v_projected,New_pressure,Drag,Step_count,MD_var)
-  return new_variable
-
-
-def solve_fast_diag(
-    v: GridVariableVector,
-    q0: Optional[GridVariable] = None,
-    implementation: Optional[str] = None) -> GridArray:
-  """Solve for pressure using the fast diagonalization approach."""
-  del q0  # unused
-  if not boundaries.has_all_periodic_boundary_conditions(*v):
-    raise ValueError('solve_fast_diag() expects periodic velocity BC')
-  grid = grids.consistent_grid(*v)
-  rhs = fd.divergence(v)
-  laplacians = list(map(array_utils.laplacian_matrix, grid.shape, grid.step))
-  pinv = fast_diagonalization.pseudoinverse(
-      laplacians, rhs.dtype,
-      hermitian=True, circulant=True, implementation=implementation)
-  return grids.applied(pinv)(rhs)
-
-
 def solve_fast_diag_moving_wall(
     v: GridVariableVector,
     q0: Optional[GridVariable] = None,
@@ -163,9 +174,8 @@ def solve_fast_diag_moving_wall(
       laplacians, rhs.dtype,
       hermitian=True, circulant=False, implementation=implementation)
   return grids.applied(pinv)(rhs)
-  
-  
-  
+
+
 def solve_fast_diag_Far_Field(
     v: GridVariableVector,
     q0: Optional[GridVariable] = None,
@@ -187,19 +197,3 @@ def solve_fast_diag_Far_Field(
       laplacians, rhs_transformed.dtype,
       hermitian=True, circulant=False, implementation='matmul')
   return grids.applied(pinv)(rhs)
-
-def calc_P(
-    v: GridVariableVector,
-    solve: Callable = solve_fast_diag,
-) -> GridVariableVector:
-  """Apply pressure projection to make a velocity field divergence free."""
-  grid = grids.consistent_grid(*v)
-  pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
-
-  q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid)
-  q0 = grids.GridVariable(q0, pressure_bc)
-
-  q = solve(v, q0)
-  q = grids.GridVariable(q, pressure_bc)
-
-  return q

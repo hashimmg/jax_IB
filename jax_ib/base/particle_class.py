@@ -138,7 +138,6 @@ class Particle:
 @register_pytree_node_class
 @dataclasses.dataclass
 class All_Variables: 
-    particles: Sequence[Particle,]
     velocity: grids.GridVariableVector
     pressure: grids.GridVariable
     Drag:Sequence[Any]
@@ -146,7 +145,7 @@ class All_Variables:
     MD_var:Any
     def tree_flatten(self):
       """Returns flattening recipe for GridVariable JAX pytree."""
-      children = (self.particles,self.velocity,self.pressure,self.Drag,self.Step_count,self.MD_var,)
+      children = (self.velocity,self.pressure,self.Drag,self.Step_count,self.MD_var,)
       aux_data = None
       return children, aux_data
 

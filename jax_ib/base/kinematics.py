@@ -1,20 +1,18 @@
 import jax
 import jax.numpy as jnp
 
-
 def displacement(parameters,t):
-    A0,f = list(*parameters)
+    A0,f = parameters
     return jnp.array([A0/2*jnp.cos(2*jnp.pi*f*t), 0.0])
     #return jnp.array([A0/2*jnp.cos(2*jnp.pi*f*t), A0/2*jnp.sin(2*jnp.pi*f*t)])
 
 
 def rotation(parameters,t):
-    alpha0,beta,f,phi = list(*parameters)
+    alpha0,beta,f,phi = parameters
     return alpha0 + beta*jnp.sin(2*jnp.pi*f*t+phi)
 
-def rotation2(parameters,t):
-    alpha0,beta,f,phi = list(*parameters)
-    return alpha0*t
+def angle(omega,t):
+    return omega*t
 
 
 def Displacement_Foil_Fourier_Dotted_Mutliple(parameters,t):
