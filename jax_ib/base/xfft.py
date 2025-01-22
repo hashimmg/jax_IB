@@ -1,0 +1,95 @@
+from functools import partial
+
+import jax
+from jax.sharding import NamedSharding
+from jax.experimental.custom_partitioning import custom_partitioning
+from jax_ib.base.utils import Dir
+
+
+def _fft(x, dist, dir):
+
+    """ Compute a local FFT along the appropriate axes (based on dist), in the
+    forward or backward direction """
+
+    if dir == Dir.FWD:
+        return jax.numpy.fft.fftn(x, axes=dist.fft_axes(len(x.shape)))
+    else:
+        return jax.numpy.fft.ifftn(x, axes=dist.fft_axes(len(x.shape)))
+
+
+def _supported_sharding(sharding, dist):
+    return NamedSharding(sharding.mesh, dist.part_spec)
+
+
+def _partition(mesh,
+               arg_shapes,
+               result_shape,
+               dist,
+               dir):
+
+    arg_shardings = jax.tree.map(lambda x: x.sharding, arg_shapes)
+    return mesh, lambda x: _fft(x, dist, dir), \
+           _supported_sharding(arg_shardings[0], dist), \
+           (_supported_sharding(arg_shardings[0], dist),)
+
+
+def _infer_sharding_from_operands(mesh,
+                                  arg_shapes,
+                                  result_shape,
+                                  dist,
+                                  dir):
+    arg_shardings = jax.tree.map(lambda x: x.sharding, arg_shapes)
+    return _supported_sharding(arg_shardings[0], dist)
+
+
+def fft(x, dist, dir):
+
+    """ Extends jax.numpy.fft.fftn to support sharding along the first or
+    second direction, without intermediate re-sharding """
+
+    @custom_partitioning
+    def _fft_(x):
+        return _fft(x, dist, dir)
+
+    _fft_.def_partition(
+        infer_sharding_from_operands=partial(_infer_sharding_from_operands,
+                                             dist=dist,
+                                             dir=dir),
+        partition=partial(_partition, dist=dist, dir=dir))
+
+    return _fft_(x)
+
+
+def xfft(x, dist, dir):
+
+    """Compute the discrete Fourier transform using a JAX-only implementation.
+
+    Arguments:
+    x    -- the input tensor
+    dist -- the data decomposition of x.
+            Should be an instance of fft_common.Dist
+    dir  -- the direction of the transform.
+            Should be an instance of fft_common.Dir
+
+    Returns the transformed tensor.
+    The output tensoris distributed according to dist.opposite
+
+    This function should be used with jit like
+
+        jit(xfft,
+            in_shardings=sharding,
+            out_shardings=sharding_opposite,
+            static_argnums=[1, 2]
+            )(x, dist, dir)
+    """
+
+    # If dist == Dist.SLABS_X, FFT along Y and Z
+    x = fft(x, dist, dir)
+
+    # Implicitly re-shards to match the required
+    # input sharding of the next fft(..., dist.opposite, ...)
+
+    # If dist == Dist.SLABS_X, FFT along X
+    x = fft(x, dist.opposite, dir)
+
+    return x
