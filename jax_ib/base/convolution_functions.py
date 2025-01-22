@@ -19,10 +19,26 @@ def gaussian(x: jax.Array,mu: jax.Array,sigma:jax.Array)->float:
 
 
 def mesh_convolve(field:GridVariable,
-                  xp:jax.Array,
-                  yp:jax.Array,
+                  x:jax.Array,
+                  y:jax.Array,
                   dirac_delta_approx: callable, axis_names:list[str]) -> jax.Array:
-    local_conv = convolve(field, xp, yp, dirac_delta_approx)
+    """
+    Compute the convolution of sharded array `field` with 2d-dirac-delta functions located at `x, y`.
+    The convolution is computed for each pair `x[i], y[i]` in parallel.
+
+    Args:
+      field: GridVariable of the field
+      x, y: locations of the dirac-delta peaks
+      dirac_delta_approx: Function approximating a dirac-delta function in 1d.
+        Expected function signature is `dirac_delta_approx(x, X, dx)`, with
+        `x` a float, `X` a `jax.Array` of shape `field.data.shape`, and `dx`
+        a float.
+      axis_names: The names of the mapped axes of the device mesh.
+
+    Returns:
+      jax.Array: the convolution result.
+    """
+    local_conv = convolve(field, x, y, dirac_delta_approx)
     return jax.lax.psum(
       jax.lax.psum(local_conv, axis_name = axis_names[0]),
       axis_name = axis_names[1])
@@ -88,4 +104,4 @@ def surf_fn_deprecated(field,xp,yp,discrete_fn):
         mapped.append([xp[i*n:(i+1)*n],yp[i*n:(i+1)*n]])
     arr = jnp.array(mapped)
     U_deltas = jax.pmap(foo_pmap)(jnp.array(mapped))
-    return U_deltas.flatten()  
+    return U_deltas.flatten()
