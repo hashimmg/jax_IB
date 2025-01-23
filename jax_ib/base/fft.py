@@ -14,29 +14,29 @@ def _get_sign(direction):
   assert direction in (FWD, BWD)
   if direction == FWD:
     return -1.0
-  elif direction == BWD:
-    return 1.0
+  return 1.0
+
 
 def _get_transform(direction):
   assert direction in (FWD, BWD)
   if direction == FWD:
     return jnp.fft.fft
-  elif direction == BWD:
-    return jnp.fft.ifft
+  return jnp.fft.ifft
 
-def _get_fft_i(axis_name: str, direction: FFTDir)-> jax.Array:
+
+def _get_fft_i(axis_name: str, direction: FFTDir)-> callable:
     """
-    Compute the FFT of a 2d-array `array` along axis `0` of the array.
+    Get the FFT transform of a 2d-array `array` along axis `0` of the array.
     `array` should be a jax.Array sharded on a device mesh ('i','j')
     `axis_name` is the name of the first sharding axis, i.e. `'i'` for
     the above mesh
 
     Args:
       array: A 2d jax Array to be transforemd
-      axis_name: The name of the mapped axis `0`.
+      direction: The fft direction, one of FFTDir('FWD'), FFTDir('BWD')
 
     Returns:
-      jax.Array: The transformed `array`.
+      callable: forward or backward fft transform function
     """
     sign = _get_sign(direction)
     transform = _get_transform(direction)
@@ -55,14 +55,6 @@ def _get_fft_i(axis_name: str, direction: FFTDir)-> jax.Array:
     return fft
 
 def _fft1d_i(array: jax.Array, axis_name: str)-> jax.Array:
-  # TODO (mganahl): make sure this is properly cached.
-  return _get_fft_i(axis_name, FWD)(array)
-
-def _ifft1d_i(array: jax.Array, axis_name: str)-> jax.Array:
-  # TODO (mganahl): make sure this is properly cached.
-  return _get_fft_i(axis_name, BWD)(array)
-
-def _get_fft_j(axis_name: str, direction: FFTDir)-> jax.Array:
     """
     Compute the FFT of a 2d-array `array` along axis `0` of the array.
     `array` should be a jax.Array sharded on a device mesh ('i','j')
@@ -76,6 +68,40 @@ def _get_fft_j(axis_name: str, direction: FFTDir)-> jax.Array:
     Returns:
       jax.Array: The transformed `array`.
     """
+
+    return _get_fft_i(axis_name, FWD)(array)
+
+def _ifft1d_i(array: jax.Array, axis_name: str)-> jax.Array:
+    """
+    Compute the inverse FFT of a 2d-array `array` along axis `0` of the array.
+    `array` should be a jax.Array sharded on a device mesh ('i','j')
+    `axis_name` is the name of the first sharding axis, i.e. `'i'` for
+    the above mesh
+
+    Args:
+      array: A 2d jax Array to be transforemd
+      axis_name: The name of the mapped axis `0`.
+
+    Returns:
+      jax.Array: The transformed `array`.
+    """
+    return _get_fft_i(axis_name, BWD)(array)
+
+def _get_fft_j(axis_name: str, direction: FFTDir)-> callable:
+    """
+    Get the FFT transform of a 2d-array `array` along axis `1` of the array.
+    `array` should be a jax.Array sharded on a device mesh ('i','j')
+    `axis_name` is the name of the first sharding axis, i.e. `'j'` for
+    the above mesh
+
+    Args:
+      array: A 2d jax Array to be transforemd
+      direction: The fft direction, one of FFTDir('FWD'), FFTDir('BWD')
+
+    Returns:
+      callable: forward or backward fft transform function
+    """
+
     sign = _get_sign(direction)
     transform = _get_transform(direction)
     def fft(array):
@@ -93,12 +119,38 @@ def _get_fft_j(axis_name: str, direction: FFTDir)-> jax.Array:
     return fft
 
 def _fft1d_j(array: jax.Array, axis_name: str)-> jax.Array:
-  # TODO (mganahl): make sure this is properly cached.
-  return _get_fft_j(axis_name, FWD)(array)
+    """
+    Compute the FFT of a 2d-array `array` along axis `1` of the array.
+    `array` should be a jax.Array sharded on a device mesh ('i','j')
+    `axis_name` is the name of the first sharding axis, i.e. `'j'` for
+    the above mesh
+
+    Args:
+      array: A 2d jax Array to be transforemd
+      axis_name: The name of the mapped axis `1`.
+
+    Returns:
+      jax.Array: The transformed `array`.
+    """
+    return _get_fft_j(axis_name, FWD)(array)
 
 def _ifft1d_j(array: jax.Array, axis_name: str)-> jax.Array:
-  # TODO (mganahl): make sure this is properly cached.
-  return _get_fft_j(axis_name, BWD)(array)
+    """
+    Compute the inverse FFT of a 2d-array `array` along axis `1` of the array.
+    `array` should be a jax.Array sharded on a device mesh ('i','j')
+    `axis_name` is the name of the first sharding axis, i.e. `'j'` for
+    the above mesh
+
+    Args:
+      array: A 2d jax Array to be transforemd
+      axis_name: The name of the mapped axis `1`.
+
+    Returns:
+      jax.Array: The transformed `array`.
+    """
+
+    return _get_fft_j(axis_name, BWD)(array)
+
 
 def fft(array: jax.Array, axis:int, axis_name:str):
     """
