@@ -799,9 +799,9 @@ class Grid:
     """
 
     mesh_shape = self.device_mesh.axis_sizes
-    for i, s in zip(index, mesh_shape):
-      if i >= s:
-        raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
+    # for i, s in zip(index, mesh_shape):
+    #   if i >= s:
+    #     raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
     sub_domain = []
     subdomain_shape = []
     for n in range(self.ndim):
@@ -814,7 +814,25 @@ class Grid:
       subgrid = Grid(shape=subdomain_shape, domain = sub_domain, periods=self.periods)
     return subgrid
 
+def add_halo_layer(array, width):
+    I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j')
+    left_neighbors = jax.lax.ppermute(array[:,-width:], 'j', [(j, (j + 1) % J) for j in range(J)])
+    right_neighbors = jax.lax.ppermute(array[:,:width], 'j', [(j, (j - 1) % J) for j in range(J)])
+    extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[:width,:], right_neighbors[:width,:]], axis=1)
+    extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-width:,:],right_neighbors[-width:,:]],axis=1)
+    upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
+    lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
+    temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
+    return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
+def extend(variable, width = 1):
+    subgrid = variable.grid
+    local_array = add_halo_layer(variable.data, width)
+    return GridVariable(GridArray(local_array, variable.offset, variable.grid), variable.bc)
+
+def crop(variable, width=1):
+    return GridVariable(GridArray(variable.data[width:-width,width:-width],
+                                  variable.offset, variable.grid), variable.bc)
 
 def domain_interior_masks(grid: Grid):
   """Returns cell face arrays with 1 on the interior, 0 on the boundary."""

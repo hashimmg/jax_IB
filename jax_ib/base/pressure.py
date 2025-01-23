@@ -2,7 +2,6 @@ from typing import Callable, Optional
 import scipy.linalg
 import numpy as np
 from jax_ib.base import array_utils
-#from jax_cfd.base import pressure
 from jax_ib.base import fast_diagonalization
 import jax.numpy as jnp
 from jax_ib.base import grids
@@ -17,32 +16,36 @@ GridVariable = grids.GridVariable
 GridVariableVector = grids.GridVariableVector
 BoundaryConditions = grids.BoundaryConditions
 
-def solve_fast_diag_pinv(
-    v: GridVariableVector,
-    pinv: callable,
-    pressure_bc: Optional[boundaries.ConstantBoundaryConditions] = None,
-) -> grids.GridArray:
-  """Solve for pressure using the fast diagonalization approach.
 
-  To support backward compatibility, if the pressure_bc are not provided and
-  velocity has all periodic boundaries, pressure_bc are assigned to be periodic.
-
-  Args:
-    v: a tuple of velocity values for each direction.
-    q0: the starting guess for the pressure.
-    pressure_bc: the boundary condition to assign to pressure. If None,
-      boundary condition is infered from velocity.
-    implementation: how to implement fast diagonalization.
-      For non-periodic BCs will automatically be matmul.
-
-  Returns:
-    A solution to the PPE equation.
+def solve_linear(velocities, pinv, width)->grids.GridArray:
   """
-  if pressure_bc is None:
-    pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
-  rhs = fd.divergence(v)
-  rhs_transformed = _rhs_transform(rhs, pressure_bc)
-  return grids.GridArray(pinv(rhs_transformed), rhs.offset, rhs.grid)
+  """
+  subgrid = velocities[0].grid
+  pressure_bc = boundaries.get_pressure_bc_from_velocity(velocities)
+  extended_velocities = tuple([grids.extend(v, width) for v in velocities])
+  rhs_extended =  fd.divergence(extended_velocities)
+  rhs = grids.crop(grids.GridVariable(rhs_extended, velocities[0].bc), width)
+  return grids.GridArray(pinv(rhs.data), rhs.offset, rhs.grid)
+
+
+def projection_and_update_pressure_sharded(
+    pressure: grids.GridVariable,
+    velocities: tuple[grids.GridVariable], pinv:callable, width:int
+) -> tuple[tuple[GridVariable, GridVariable], GridVariable]:
+  """
+  """
+  grid = pressure.grid
+  pressure_bc = boundaries.get_pressure_bc_from_velocity(velocities)
+  solution = grids.GridVariable(solve_linear(velocities, pinv, width), pressure_bc)
+  new_pressure_array =  grids.GridArray(solution.data + pressure.data,pressure.offset,grid)
+  new_pressure = grids.GridVariable(new_pressure_array,pressure_bc)
+
+  extended_solution = grids.extend(solution, width)
+  grads =  fd.forward_difference(extended_solution)
+  grads = tuple([grids.crop(grids.GridVariable(grids.GridArray(g.data, g.offset, g.grid), solution.bc)) for g in grads])
+
+  v_projected = tuple(grids.GridVariable(u.array - g.array, u.bc) for u, g in zip(velocities, grads))
+  return v_projected, new_pressure
 
 
 def _rhs_transform(
@@ -91,35 +94,6 @@ def solve_fast_diag(
   return grids.applied(pinv)(rhs)
 
 
-def projection_and_update_pressure_pinv(
-    pressure: GridVariable,
-    velocity: tuple[GridVariable],
-    pinv: callable,
-) -> GridVariableVector:
-  """
-  Apply pressure projection to make a velocity field divergence free.
-  """
-  v = velocity
-  grid = grids.consistent_grid(*v)
-  pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
-
-  qsol = solve_fast_diag_pinv(v, pinv)
-  q = grids.GridVariable(qsol, pressure_bc)
-
-  new_pressure_array =  grids.GridArray(qsol.data + pressure.data,qsol.offset,qsol.grid)
-  new_pressure = grids.GridVariable(new_pressure_array,pressure_bc)
-
-  q_grad = fd.forward_difference(q)
-  if boundaries.has_all_periodic_boundary_conditions(*v):
-    v_projected = tuple(
-        grids.GridVariable(u.array - q_g, u.bc) for u, q_g in zip(v, q_grad))
-  else:
-    v_projected = tuple(
-        grids.GridVariable(u.array - q_g, u.bc).impose_bc()
-        for u, q_g in zip(v, q_grad))
-  return v_projected, new_pressure
-
-
 def projection_and_update_pressure(
     pressure: GridVariable,
     velocity: tuple[GridVariable],
@@ -127,11 +101,6 @@ def projection_and_update_pressure(
 ) -> GridVariableVector:
   """Apply pressure projection to make a velocity field divergence free."""
   v = velocity
-  #old_pressure = All_variables.pressure
-  #particles = All_variables.particles
-  #Drag =  All_variables.Drag
-  #Step_count = All_variables.Step_count
-  #MD_var = All_variables.MD_var
   grid = grids.consistent_grid(*v)
   pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
 
@@ -153,6 +122,7 @@ def projection_and_update_pressure(
         grids.GridVariable(u.array - q_g, u.bc).impose_bc()
         for u, q_g in zip(v, q_grad))
   return v_projected, New_pressure
+
 
 def solve_fast_diag_moving_wall(
     v: GridVariableVector,

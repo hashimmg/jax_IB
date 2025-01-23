@@ -73,7 +73,7 @@ def central_difference(
   ...
 
 
-def central_difference(u, axis=None):
+def central_difference(u, axis=None)->GridArray:
   """Approximates grads with central differences."""
   if axis is None:
     axis = range(u.grid.ndim)
@@ -94,7 +94,7 @@ def backward_difference(
   ...
 
 
-def backward_difference(u, axis=None):
+def backward_difference(u, axis=None)->GridArray:
   """
   First order finite-difference approximation of the backward gradient of `u`
   """
@@ -118,7 +118,7 @@ def forward_difference(
   ...
 
 
-def forward_difference(u, axis=None):
+def forward_difference(u:GridVariable, axis=None)->GridArray:
   """
   First order finite-difference approximation of the forward gradient of `u`
   """
