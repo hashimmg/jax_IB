@@ -55,9 +55,11 @@ def _get_fft_i(axis_name: str, direction: FFTDir)-> jax.Array:
     return fft
 
 def _fft1d_i(array: jax.Array, axis_name: str)-> jax.Array:
+  # TODO (mganahl): make sure this is properly cached.
   return _get_fft_i(axis_name, FWD)(array)
 
 def _ifft1d_i(array: jax.Array, axis_name: str)-> jax.Array:
+  # TODO (mganahl): make sure this is properly cached.
   return _get_fft_i(axis_name, BWD)(array)
 
 def _get_fft_j(axis_name: str, direction: FFTDir)-> jax.Array:
@@ -91,9 +93,11 @@ def _get_fft_j(axis_name: str, direction: FFTDir)-> jax.Array:
     return fft
 
 def _fft1d_j(array: jax.Array, axis_name: str)-> jax.Array:
+  # TODO (mganahl): make sure this is properly cached.
   return _get_fft_j(axis_name, FWD)(array)
 
 def _ifft1d_j(array: jax.Array, axis_name: str)-> jax.Array:
+  # TODO (mganahl): make sure this is properly cached.
   return _get_fft_j(axis_name, BWD)(array)
 
 def fft(array: jax.Array, axis:int, axis_name:str):
