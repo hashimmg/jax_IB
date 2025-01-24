@@ -190,10 +190,10 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
 
   def grow(self, width: int=0):
     if width > 0 and self.width == 0:
-      return GridArray(add_halo_layer(self.data, width), self.offset, self.grid, width)
+      return GridArray(pad_shard(self.data, width), self.offset, self.grid, width)
     elif width > 0 and self.width > 0:
       assert width == self.width
-      return GridArray(update_halo_layer(self.data, width), self.offset, self.grid, width)
+      return GridArray(update_padding_layer(self.data, width), self.offset, self.grid, width)
     elif width == 0:
       return GridArray(self.data,self.offset, self.grid, width)
     else:
@@ -851,27 +851,57 @@ class Grid:
       subgrid = Grid(shape=subdomain_shape, domain = sub_domain, periods=self.periods)
     return subgrid
 
-def add_halo_layer(array, width):
-    I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j')
-    left_neighbors = jax.lax.ppermute(array[:,-width:], 'j', [(j, (j + 1) % J) for j in range(J)])
-    right_neighbors = jax.lax.ppermute(array[:,:width], 'j', [(j, (j - 1) % J) for j in range(J)])
-    extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[:width,:], right_neighbors[:width,:]], axis=1)
-    extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-width:,:],right_neighbors[-width:,:]],axis=1)
-    upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
-    lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
-    temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
-    return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
+def pad_shard(array: jax.Array, width: int)->jax.Array:
+  """
+  Collective function exchanging information between neighboring patches on the device grid.
+  `array` is the local shard of the global jax.Array of a field variable.
+  `array` gets padded with a padding layer of width `width` in x and y direction with values
+  from the neighboring cells (top, bottom and corners) s.t. the local arrays have overlapping 
+  regions of width `width`.
 
-def update_halo_layer(array, width):
-    I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j')
-    left_neighbors = jax.lax.ppermute(array[width:-width,-2*width:-width], 'j', [(j, (j + 1) % J) for j in range(J)])
-    right_neighbors = jax.lax.ppermute(array[width:-width,width:2*width], 'j', [(j, (j - 1) % J) for j in range(J)])
-    extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[width:2*width,width:-width], right_neighbors[:width,:]], axis=1)
-    extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-2*width:-width,width:-width],right_neighbors[-width:,:]],axis=1)
-    upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
-    lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
-    temp = jnp.concatenate([left_neighbors, array[width:-width, width:-width], right_neighbors], axis=1)
-    return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
+  Args:
+    array: The local shard of the global array
+    width: padding width.
+
+  Returns:
+    jax.Array
+  """
+
+  I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j') # mganahl: a bit dirty
+  left_neighbors = jax.lax.ppermute(array[:,-width:], 'j', [(j, (j + 1) % J) for j in range(J)])
+  right_neighbors = jax.lax.ppermute(array[:,:width], 'j', [(j, (j - 1) % J) for j in range(J)])
+  extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[:width,:], right_neighbors[:width,:]], axis=1)
+  extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-width:,:],right_neighbors[-width:,:]],axis=1)
+  upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
+  lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
+  temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
+  return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
+
+
+def update_padding_layer(array: jax.Array, width: int) -> jax.Array:
+  """
+  Collective function exchanging information between neighboring patches on the device grid.
+  `array` is the local, padded shard of the global jax.Array of a field variable.
+  the padding layer of `array` gets updated with with values from the neighboring cells
+  (top, bottom and corners) s.t. the local arrays have overlapping regions of width `width`.
+
+  Args:
+    array: The local shard of the global array
+    width: padding width.
+
+  Returns:
+    jax.Array
+  """
+
+  I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j') # mganahl: a bit dirty
+  left_neighbors = jax.lax.ppermute(array[width:-width,-2*width:-width], 'j', [(j, (j + 1) % J) for j in range(J)])
+  right_neighbors = jax.lax.ppermute(array[width:-width,width:2*width], 'j', [(j, (j - 1) % J) for j in range(J)])
+  extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[width:2*width,width:-width], right_neighbors[:width,:]], axis=1)
+  extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-2*width:-width,width:-width],right_neighbors[-width:,:]],axis=1)
+  upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
+  lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
+  temp = jnp.concatenate([left_neighbors, array[width:-width, width:-width], right_neighbors], axis=1)
+  return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
 
 def domain_interior_masks(grid: Grid):

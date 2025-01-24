@@ -17,8 +17,19 @@ GridVariableVector = grids.GridVariableVector
 BoundaryConditions = grids.BoundaryConditions
 
 
-def solve_linear(local_velocities, pinv, width)->grids.GridArray:
+def solve_linear(local_velocities: tuple[GridVariable],
+                 pinv: callable, width:int)->grids.GridArray:
   """
+  Invert  ∇²p = ∇u for p on distributed hardware.
+
+  Args:
+    local_velocities: the local shards of the global velocity field
+    pinv: the (sharded/distributed) function for inverting the above equation.
+    width: padding width for local arrays used when computing local
+      finite-differences
+
+  Returns:
+    GridArray: The solution
   """
   pressure_bc = boundaries.get_pressure_bc_from_velocity(local_velocities)
   local_velocities = tuple([v.grow(width) for v in local_velocities])
@@ -31,6 +42,7 @@ def projection_and_update_pressure_sharded(
     velocities: tuple[grids.GridVariable], pinv:callable, width:int
 ) -> tuple[tuple[GridVariable, GridVariable], GridVariable]:
   """
+  Sharded (distributed) version of pressure projection. 
   """
   pressure_bc = boundaries.get_pressure_bc_from_velocity(velocities)
   solution = grids.GridVariable(solve_linear(velocities, pinv, width), pressure_bc)
