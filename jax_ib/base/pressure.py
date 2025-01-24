@@ -17,15 +17,13 @@ GridVariableVector = grids.GridVariableVector
 BoundaryConditions = grids.BoundaryConditions
 
 
-def solve_linear(velocities, pinv, width)->grids.GridArray:
+def solve_linear(local_velocities, pinv, width)->grids.GridArray:
   """
   """
-  subgrid = velocities[0].grid
-  pressure_bc = boundaries.get_pressure_bc_from_velocity(velocities)
-  extended_velocities = tuple([grids.extend(v, width) for v in velocities])
-  rhs_extended =  fd.divergence(extended_velocities)
-  rhs = grids.crop(grids.GridVariable(rhs_extended, velocities[0].bc), width)
-  return grids.GridArray(pinv(rhs.data), rhs.offset, rhs.grid)
+  pressure_bc = boundaries.get_pressure_bc_from_velocity(local_velocities)
+  local_velocities = tuple([v.grow(width) for v in local_velocities])
+  rhs =  fd.divergence(local_velocities).crop(width)
+  return grids.GridArray(pinv(rhs.data), rhs.offset, rhs.grid, rhs.width)
 
 
 def projection_and_update_pressure_sharded(
@@ -34,15 +32,13 @@ def projection_and_update_pressure_sharded(
 ) -> tuple[tuple[GridVariable, GridVariable], GridVariable]:
   """
   """
-  grid = pressure.grid
   pressure_bc = boundaries.get_pressure_bc_from_velocity(velocities)
   solution = grids.GridVariable(solve_linear(velocities, pinv, width), pressure_bc)
-  new_pressure_array =  grids.GridArray(solution.data + pressure.data,pressure.offset,grid)
+  new_pressure_array =  grids.GridArray(solution.data + pressure.data,pressure.offset,pressure.grid, pressure.width)
   new_pressure = grids.GridVariable(new_pressure_array,pressure_bc)
 
-  extended_solution = grids.extend(solution, width)
-  grads =  fd.forward_difference(extended_solution)
-  grads = tuple([grids.crop(grids.GridVariable(grids.GridArray(g.data, g.offset, g.grid), solution.bc)) for g in grads])
+  grads =  tuple([g.crop(width) for g in fd.forward_difference(solution.grow(width))])
+  grads = tuple([grids.GridVariable(g, solution.bc) for g in grads])
 
   v_projected = tuple(grids.GridVariable(u.array - g.array, u.bc) for u, g in zip(velocities, grads))
   return v_projected, new_pressure
@@ -104,13 +100,13 @@ def projection_and_update_pressure(
   grid = grids.consistent_grid(*v)
   pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
 
-  q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid)
+  q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid, pressure.width)
   q0 = grids.GridVariable(q0, pressure_bc)
 
   qsol = solve(v, q0)
   q = grids.GridVariable(qsol, pressure_bc)
 
-  New_pressure_Array =  grids.GridArray(qsol.data + pressure.data,qsol.offset,qsol.grid)
+  New_pressure_Array =  grids.GridArray(qsol.data + pressure.data,qsol.offset,qsol.grid, pressure.width)
   New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc)
 
   q_grad = fd.forward_difference(q)

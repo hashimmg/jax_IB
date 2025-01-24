@@ -53,7 +53,7 @@ def stencil_sum(*arrays: GridArray) -> GridArray:
   #   Actually passed: (iterable: Generator[Union[jax.interpreters.xla.DeviceArray, numpy.ndarray], Any, None])
   result = sum(array.data for array in arrays)  # type: ignore
   grid = grids.consistent_grid(*arrays)
-  return grids.GridArray(result, offset, grid)
+  return grids.GridArray(result, offset, grid, arrays[0].width)
 
 
 # incompatible with typing.overload

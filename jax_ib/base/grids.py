@@ -104,8 +104,8 @@ class BCArray(np.lib.mixins.NDArrayOperatorsMixin):
       return tuple(BCArray(r) for r in result)
     else:
       return BCArray(result)
-#register_pytree_node_class
-@jax.tree_util.Partial(register_dataclass, data_fields =['data'], meta_fields = ['offset','grid'])
+
+@jax.tree_util.Partial(register_dataclass, data_fields =['data'], meta_fields = ['offset','grid', 'width'])
 @dataclasses.dataclass
 class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   """Data with an alignment offset and an associated grid.
@@ -132,15 +132,17 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   data: Array
   offset: Tuple[float, ...]
   grid: Grid
+  width: int
   def __repr__(self):
     prefix = '    '
     offsetrepr = textwrap.indent(f"offset: {repr(self.offset)}", prefix=prefix)
     repr_string = f"GridArray\n{textwrap.indent(repr(self.data),prefix = prefix)}\n{textwrap.indent(repr(self.grid), prefix=prefix)}\n{offsetrepr}"
     return repr_string
+
   def tree_flatten(self):
     """Returns flattening recipe for GridArray JAX pytree."""
     children = (self.data,)
-    aux_data = (self.offset, self.grid)
+    aux_data = (self.offset, self.grid, self.width)
     return children, aux_data
 
   @classmethod
@@ -155,6 +157,7 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   @property
   def shape(self) -> Tuple[int, ...]:
     return self.data.shape
+
 
   _HANDLED_TYPES = (numbers.Number, np.ndarray, jax.Array,
                     core.ShapedArray, jax.core.Tracer)
@@ -177,9 +180,34 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
     grid = consistent_grid(*[x for x in inputs if isinstance(x, GridArray)])
     #grid = inputs.grid#consistent_grid(*[x for x in inputs])
     if isinstance(result, tuple):
-      return tuple(GridArray(r, offset, grid) for r in result)
+      return tuple(GridArray(r, offset, grid, self.width) for r in result)
     else:
-      return GridArray(result, offset, grid)
+      return GridArray(result, offset, grid, self.width)
+
+  def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
+    subgrid = self.grid.subgrid(mesh_index, width=width)
+    return GridArray(self.data, self.offset, subgrid, width=0)
+
+  def grow(self, width: int=0):
+    if width > 0 and self.width == 0:
+      return GridArray(add_halo_layer(self.data, width), self.offset, self.grid, width)
+    elif width > 0 and self.width > 0:
+      assert width == self.width
+      return GridArray(update_halo_layer(self.data, width), self.offset, self.grid, width)
+    elif width == 0:
+      return GridArray(self.data,self.offset, self.grid, width)
+    else:
+      raise ValueError(f"unsupported value of width = {width}")
+
+  def crop(self, width:int=0):
+    if self.width == width:
+      return GridArray(self.data[width:-width,width:-width],self.offset, self.grid, width=0)
+    elif self.width == 0:
+      return GridArray(self.data,self.offset, self.grid, width=0)
+    else:
+      raise ValueError(f"found self.width = {self.width}, which is incompatible with width = {width}")
+
+
 
 
 GridArrayVector = Tuple[GridArray, ...]
@@ -220,9 +248,6 @@ class BoundaryConditions:
       dimension `i`.
   """
   types: Tuple[Tuple[str, str], ...]
-
-
-
 
   def shift(
       self,
@@ -333,8 +358,7 @@ class BoundaryConditions:
         'impose_bc() not implemented in BoundaryConditions base class.')
 
 
-#@register_pytree_node_class
-@jax.tree_util.Partial(register_dataclass, data_fields =['array','bc'], meta_fields=[])
+@jax.tree_util.Partial(register_dataclass, data_fields =['array'], meta_fields=['bc'])
 @dataclasses.dataclass
 class GridVariable:
   """Associates a GridArray with BoundaryConditions.
@@ -399,6 +423,10 @@ class GridVariable:
   def grid(self) -> Grid:
     return self.array.grid
 
+  @property
+  def width(self) -> int:
+    return self.array.width
+  
   def shift(
       self,
       offset: int,
@@ -453,6 +481,15 @@ class GridVariable:
     """
     return self.bc.trim_boundary(self.array)
 
+  def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
+    return GridVariable(self.array.to_subgrid(mesh_index, width), self.bc)
+
+  def grow(self, width:int=0):
+    return GridVariable(self.array.grow(width), self.bc)
+
+  def crop(self, width:int=0):
+    return GridVariable(self.array.crop(width), self.bc)
+
   def impose_bc(self) -> GridVariable:
     """Returns the GridVariable with edge BC enforced, if applicable.
 
@@ -502,7 +539,7 @@ def applied(func):
         k: v.data if isinstance(v, GridArray) else v for k, v in kwargs.items()
     }
     data = func(*raw_args, **raw_kwargs)
-    return GridArray(data, offset, grid)
+    return GridArray(data, offset, grid,args[0].width)
 
   return wrapper
 
@@ -685,7 +722,7 @@ class Grid:
   def stagger(self, v: Tuple[Array, ...]) -> Tuple[GridArray, ...]:
     """Places the velocity components of `v` on the `Grid`'s cell faces."""
     offsets = self.cell_faces
-    return tuple(GridArray(u, o, self) for u, o in zip(v, offsets))
+    return tuple(GridArray(u, o, self, 0) for u, o in zip(v, offsets))
 
   def center(self, v: PyTree) -> PyTree:
     """Places all arrays in the pytree `v` at the `Grid`'s cell center."""
@@ -788,10 +825,10 @@ class Grid:
     """
     if offset is None:
       offset = self.cell_center
-    return GridArray(fn(*self.mesh(offset)), offset, self)
+    return GridArray(fn(*self.mesh(offset)), offset, self, 0)
 
 
-  def subgrid(self,index: tuple[int,int], boundary_layer_widths: tuple[int, int]=(0,0)):
+  def subgrid(self,index: tuple[int,int], width: int=0):
     """
     Create a subgrid of `Grid` for the index `index` on a device-mesh given by Grid.device_mesh.
     Grid shape has to be divisble by Grid.device_mesh.axis_sizes.
@@ -807,9 +844,9 @@ class Grid:
     for n in range(self.ndim):
       s = mesh_shape[n]
       stride = self.shape[n]//s
-      subdomain_shape.append(stride + 2 * boundary_layer_widths[n])
+      subdomain_shape.append(stride + 2 * width)
       sub_domain.append(
-        (self.domain[n][0]-boundary_layer_widths[n]*self.step[n] + self.step[n]*(stride *index[n]), self.domain[n][0]+boundary_layer_widths[n]*self.step[n] + self.step[n]*(stride *(index[n]+1)))
+        (self.domain[n][0]-width*self.step[n] + self.step[n]*(stride *index[n]), self.domain[n][0]+width*self.step[n] + self.step[n]*(stride *(index[n]+1)))
       )
       subgrid = Grid(shape=subdomain_shape, domain = sub_domain, periods=self.periods)
     return subgrid
@@ -825,14 +862,17 @@ def add_halo_layer(array, width):
     temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
     return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
-def extend(variable, width = 1):
-    subgrid = variable.grid
-    local_array = add_halo_layer(variable.data, width)
-    return GridVariable(GridArray(local_array, variable.offset, variable.grid), variable.bc)
+def update_halo_layer(array, width):
+    I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j')
+    left_neighbors = jax.lax.ppermute(array[width:-width,-2*width:-width], 'j', [(j, (j + 1) % J) for j in range(J)])
+    right_neighbors = jax.lax.ppermute(array[width:-width,width:2*width], 'j', [(j, (j - 1) % J) for j in range(J)])
+    extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[width:2*width,width:-width], right_neighbors[:width,:]], axis=1)
+    extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-2*width:-width,width:-width],right_neighbors[-width:,:]],axis=1)
+    upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
+    lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
+    temp = jnp.concatenate([left_neighbors, array[width:-width, width:-width], right_neighbors], axis=1)
+    return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
-def crop(variable, width=1):
-    return GridVariable(GridArray(variable.data[width:-width,width:-width],
-                                  variable.offset, variable.grid), variable.bc)
 
 def domain_interior_masks(grid: Grid):
   """Returns cell face arrays with 1 on the interior, 0 on the boundary."""

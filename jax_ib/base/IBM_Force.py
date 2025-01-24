@@ -195,8 +195,8 @@ def immersed_boundary_force(velocity_field: tuple[GridVariable, GridVariable],
           velocity_field, particle, dirac_delta_approx, surface_fn,t, dt)
         forcex += per_object_forcex
         forcey += per_object_forcey
-    return (GridVariable(GridArray(forcex,velocity_field[0].offset,velocity_field[0].grid), velocity_field[0].bc),
-            GridVariable(GridArray(forcey,velocity_field[1].offset,velocity_field[1].grid), velocity_field[1].bc))
+    return (GridVariable(GridArray(forcex,velocity_field[0].offset,velocity_field[0].grid, velocity_field[0].width), velocity_field[0].bc),
+            GridVariable(GridArray(forcey,velocity_field[1].offset,velocity_field[1].grid, velocity_field[1].width), velocity_field[1].bc))
 
 
 def immersed_boundary_force_per_particle_deprecated(
@@ -325,6 +325,6 @@ def immersed_boundary_force_deprecated(velocity_field: tuple[GridVariable, GridV
           surface_fn,dx_dt,domega_dt,rotation,dt)
         forcex += per_object_forcex
         forcey += per_object_forcey
-    return (GridVariable(GridArray(forcex,velocity_field[0].offset,velocity_field[0].grid), velocity_field[0].bc),
-            GridVariable(GridArray(forcey,velocity_field[1].offset,velocity_field[1].grid), velocity_field[1].bc))
+    return (GridVariable(GridArray(forcex,velocity_field[0].offset,velocity_field[0].grid, velocity_field[0].width), velocity_field[0].bc),
+            GridVariable(GridArray(forcey,velocity_field[1].offset,velocity_field[1].grid, velocity_field[1].width), velocity_field[1].bc))
 

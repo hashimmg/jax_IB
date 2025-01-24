@@ -273,7 +273,7 @@ def advect_van_leer(
     # for negative velocity we simply need to shift the correction along v axis.
     # Cast to GridVariable so that we can apply a shift() operation.
     forward_correction_array = grids.GridVariable(
-        grids.GridArray(forward_correction, u.offset, u.grid), u.bc)
+        grids.GridArray(forward_correction, u.offset, u.grid, u.width), u.bc)
     backward_correction_array = forward_correction_array.shift(+1, axis)
     backward_correction = backward_correction_array.data
     abs_velocity = abs(u.array)
