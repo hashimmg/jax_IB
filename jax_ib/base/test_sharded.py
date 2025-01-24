@@ -114,7 +114,7 @@ def test_explicit_update(mesh, N):
     explicit_update = equations.navier_stokes_explicit_terms(
         density=1.0, viscosity=1.0, dt=dt,grid=subgrid, convect=convect, diffuse=diffusion.diffuse, forcing=None)
 
-    local_velocities = tuple([u.to_subgrid((i,j), width).grow(width) for u in velocities])
+    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
     return tuple([e.crop(width) for e in explicit_update(local_velocities)])
 
   dt=5E-4
@@ -136,7 +136,7 @@ def test_advect(mesh, N):
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
 
-    local_velocities = tuple([u.to_subgrid((i,j), width).grow(width) for u in velocities])
+    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
     result = convect(local_velocities)
     return tuple([e.crop(width) for e in convect(local_velocities)])
 
@@ -156,7 +156,7 @@ def test_laplacian(mesh, N):
   def laplacian_distributed(variable,width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_variable = variable.to_subgrid((i,j), width).grow(width)
+      local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
       return fd.laplacian(local_variable).crop(width)
 
   L = 5.0
@@ -174,7 +174,7 @@ def test_divergence(mesh, N):
   def divergence_distributed(velocities,width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_velocities = tuple([u.to_subgrid((i,j), width).grow(width) for u in velocities])
+      local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
       return fd.divergence(local_velocities).crop(width)
 
   L = 5.0
@@ -192,7 +192,7 @@ def test_diffuse(mesh, N, viscosity=0.05):
   def diffuse_distributed(variable, viscosity, width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_variable = variable.to_subgrid((i,j), width).grow(width)
+      local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
       return diffusion.diffuse(local_variable, viscosity).crop(width)
 
   L = 5.0
@@ -210,7 +210,7 @@ def test_linear_interpolation(mesh, N):
   def linear_interpolation_distributed(variable, target_offset, width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_variable = variable.to_subgrid((i,j), width).grow(width)
+      local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
       return interpolation.linear(local_variable, target_offset,None,None).crop(width)
 
   L = 5.0
@@ -231,8 +231,8 @@ def test_upwind_interpolation(mesh, N):
     #create a subgrid for the current patch
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
-    local_velocities = tuple([u.to_subgrid((i,j), width).grow(width) for u in velocities])
-    local_variable = variable.to_subgrid((i,j), width).grow(width)
+    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
+    local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
     return interpolation.upwind(local_variable, offset,local_velocities, None).crop(width)
 
 

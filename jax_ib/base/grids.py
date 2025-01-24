@@ -188,7 +188,7 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
     subgrid = self.grid.subgrid(mesh_index, width=width)
     return GridArray(self.data, self.offset, subgrid, width=0)
 
-  def grow(self, width: int=0):
+  def shard_pad(self, width: int=0):
     if width > 0 and self.width == 0:
       return GridArray(pad_shard(self.data, width), self.offset, self.grid, width)
     elif width > 0 and self.width > 0:
@@ -484,8 +484,8 @@ class GridVariable:
   def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
     return GridVariable(self.array.to_subgrid(mesh_index, width), self.bc)
 
-  def grow(self, width:int=0):
-    return GridVariable(self.array.grow(width), self.bc)
+  def shard_pad(self, width:int=0):
+    return GridVariable(self.array.shard_pad(width), self.bc)
 
   def crop(self, width:int=0):
     return GridVariable(self.array.crop(width), self.bc)

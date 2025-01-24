@@ -32,7 +32,7 @@ def solve_linear(local_velocities: tuple[GridVariable],
     GridArray: The solution
   """
   pressure_bc = boundaries.get_pressure_bc_from_velocity(local_velocities)
-  local_velocities = tuple([v.grow(width) for v in local_velocities])
+  local_velocities = tuple([v.shard_pad(width) for v in local_velocities])
   rhs =  fd.divergence(local_velocities).crop(width)
   return grids.GridArray(pinv(rhs.data), rhs.offset, rhs.grid, rhs.width)
 
@@ -42,14 +42,14 @@ def projection_and_update_pressure_sharded(
     velocities: tuple[grids.GridVariable], pinv:callable, width:int
 ) -> tuple[tuple[GridVariable, GridVariable], GridVariable]:
   """
-  Sharded (distributed) version of pressure projection. 
+  Sharded (distributed) version of pressure projection.
   """
   pressure_bc = boundaries.get_pressure_bc_from_velocity(velocities)
   solution = grids.GridVariable(solve_linear(velocities, pinv, width), pressure_bc)
   new_pressure_array =  grids.GridArray(solution.data + pressure.data,pressure.offset,pressure.grid, pressure.width)
   new_pressure = grids.GridVariable(new_pressure_array,pressure_bc)
 
-  grads =  tuple([g.crop(width) for g in fd.forward_difference(solution.grow(width))])
+  grads =  tuple([g.crop(width) for g in fd.forward_difference(solution.shard_pad(width))])
   grads = tuple([grids.GridVariable(g, solution.bc) for g in grads])
 
   v_projected = tuple(grids.GridVariable(u.array - g.array, u.bc) for u, g in zip(velocities, grads))
