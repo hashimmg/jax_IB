@@ -137,7 +137,7 @@ def navier_stokes_rk_updated(
   def step_fn(all_variables: All_Variables):
     u = [None] * num_steps
     k = [None] * num_steps
-    time_stamp = all_variables.velocity[1].bc.time_stamp # TODO (mganahl): improve time tracking
+    time = all_variables.time
     def pressure_gradient_to_GridVariable(pressure_gradient,bcs):
         """
         unwrap pressure_gradient (tm.Vector[tuple[GridArray, GridArray]]
@@ -148,7 +148,7 @@ def navier_stokes_rk_updated(
     ubc = tuple([v.bc for v in all_variables.velocity])
     pressure = tree_math.Vector(all_variables.pressure)
 
-    velocity_field = tree_math.Vector(all_variables.velocity) # all_variables.velocity is type tuple[GridVariable, GridVariable]
+    velocity_field = tree_math.Vector(all_variables.velocity)
     u[0] = velocity_field
     k[0] = explicit_terms(velocity_field)
 
@@ -161,17 +161,13 @@ def navier_stokes_rk_updated(
       k[i] = explicit_terms(u[i])
 
     # mganahl: why is dP below not multiplied by dt?
-    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP    # this operation somehow resets the time stamp of the boundary condition, so we need to reset it back
-    u_star.tree[0].bc.time_stamp = time_stamp
-    u_star.tree[1].bc.time_stamp = time_stamp
+    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP  
 
-    Force = tree_math.Vector(IBM(u_star.tree, time_stamp, dt))
+    Force = tree_math.Vector(IBM(u_star.tree, time, dt))
     u_star_star = u_star + dt * Force
 
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
-
-    updated_variables = All_Variables(u_final,new_pressure, all_variables.Drag, all_variables.Step_count + 1,all_variables.MD_var)
-    updated_variables = equation.update_BC(updated_variables) # boundary conditions may be time dependent
+    updated_variables = All_Variables(u_final,new_pressure, all_variables.Drag, all_variables.Step_count + 1,all_variables.MD_var, time + dt)
 
     return updated_variables
 

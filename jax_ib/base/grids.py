@@ -654,7 +654,8 @@ class Grid:
       step: Optional[Union[float, Sequence[float]]] = None,
       domain: Optional[Union[float, Sequence[Tuple[float, float]]]] = None,
       periods: Optional[tuple[float, float]] = None,
-      device_mesh:Optional[jax._src.mesh.Mesh] = None
+      device_mesh:Optional[jax._src.mesh.Mesh] = None,
+      dtype = jnp.float64
   ):
     """Construct a grid object."""
     shape = tuple(operator.index(s) for s in shape)
@@ -675,7 +676,7 @@ class Grid:
           if len(bounds) != 2:
             raise ValueError(
                 f'domain is not sequence of pairs of numbers: {domain}')
-      domain = tuple((jnp.float32(lower), jnp.float32(upper)) for lower, upper in domain)
+      domain = tuple((jnp.astype(lower, dtype), jnp.astype(upper, dtype)) for lower, upper in domain)
 
     else:
       if step is None:
@@ -701,6 +702,7 @@ class Grid:
           raise ValueError(f"grid shape {self.shape} is not integer divisible"
                            f"by a device-mesh shape {mesh_shape}")
       object.__setattr__(self, 'device_mesh', device_mesh)
+    object.__setattr__(self, 'dtype', dtype)
 
   @property
   def ndim(self) -> int:
@@ -747,12 +749,12 @@ class Grid:
                        f'{self.ndim}')
     axes = []
     for n, ((lower, _), offset_i, length, step) in enumerate(zip(self.domain, offset, self.shape, self.step)):
-      if self.periods[n] is not None:
+      if self.periods:
         axes.append((lower + (jnp.arange(length) + offset_i) * step)%self.periods[n])
       else:
         axes.append(lower + (jnp.arange(length) + offset_i) * step)
     return tuple(axes)
-  
+
 
   def fft_axes(self) -> Tuple[Array, ...]:
     """Returns the ordinal frequencies corresponding to the axes.
