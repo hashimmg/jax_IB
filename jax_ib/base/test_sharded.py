@@ -299,10 +299,10 @@ def test_immersed_boundary_force(mesh, N, obj_fns):
 
 @pytest.mark.parametrize("N", [64])
 @pytest.mark.parametrize("num_steps", [10,1000])
-def test_navier_stokes_step(mesh, N, num_steps, obj_fns):
+def test_update_step_step(mesh, N, num_steps, obj_fns):
   @partial(shard_map, mesh=mesh, in_specs=(P('i','j'),(P('i','j'), P('i','j')),(P('i'), P('j')),None,None,None),
            out_specs=(P('i','j'), P('i','j')))
-  def navier_stokes_step_sharded(pressure, velocities,laplacian_eigenvalues, width, num_steps,dt):
+  def update_step_sharded(pressure, velocities,laplacian_eigenvalues, width, num_steps,dt):
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
     t = num_steps * dt
@@ -369,6 +369,6 @@ def test_navier_stokes_step(mesh, N, num_steps, obj_fns):
   u_expected, p_expected = prs.projection_and_update_pressure(pressure, u_star_star) 
 
   eigvals = tuple([np.fft.fft(array_utils.laplacian_column(size, step)) for size, step in zip(grid.shape, grid.step)]) 
-  u_actual, p_actual = navier_stokes_step_sharded(pressure, velocities,eigvals, 1, num_steps,dt) 
+  u_actual, p_actual = update_step_sharded(pressure, velocities,eigvals, 1, num_steps,dt) 
   [np.testing.assert_allclose(a.data,b.data) for (a,b) in zip(u_actual, u_expected)]
   np.testing.assert_allclose(p_actual.data,p_expected.data, atol=1E-7)
