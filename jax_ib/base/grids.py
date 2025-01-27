@@ -602,13 +602,13 @@ class Grid:
     shape: the shape of the grid in each dimension
     step: the step size of the discretization in each dimension
     domain: the domain boundaries in each dimension
-    periods: the periods in each dimensions; if `None`, grid is non-periodic
+    periods: Periodicity of the grid. If (None,None) (default)its not periodic.
     device_mesh: The mesh of the device grid
   """
   shape: Tuple[int, ...]
   step: Tuple[float, ...]
   domain: Tuple[Tuple[float, float], ...]
-  periods: float = None
+  periods: tuple[float, float] = None
   device_mesh: jax._src.mesh.Mesh = None
 
   def __init__(
@@ -616,13 +616,13 @@ class Grid:
       shape: Sequence[int],
       step: Optional[Union[float, Sequence[float]]] = None,
       domain: Optional[Union[float, Sequence[Tuple[float, float]]]] = None,
-      periods: Optional[float] = None,
+      periods: Optional[tuple[float, float]] = None,
       device_mesh:Optional[jax._src.mesh.Mesh] = None
   ):
     """Construct a grid object."""
     shape = tuple(operator.index(s) for s in shape)
     object.__setattr__(self, 'shape', shape)
-    object.__setattr__(self, 'device_mesh', device_mesh)
+
     object.__setattr__(self, 'periods', periods)
 
     if step is not None and domain is not None:
@@ -656,6 +656,14 @@ class Grid:
     step = tuple(
         (upper - lower) / size for (lower, upper), size in zip(domain, shape))
     object.__setattr__(self, 'step', step)
+
+    if device_mesh is not None:
+      mesh_shape = device_mesh.axis_sizes
+      for s1, s2 in zip(self.shape, mesh_shape):
+        if divmod(s1, s2)[1] != 0:
+          raise ValueError(f"grid shape {self.shape} is not integer divisible"
+                           f"by a device-mesh shape {mesh_shape}")
+      object.__setattr__(self, 'device_mesh', device_mesh)
 
   @property
   def ndim(self) -> int:
@@ -700,14 +708,14 @@ class Grid:
     if len(offset) != self.ndim:
       raise ValueError(f'unexpected offset length: {len(offset)} vs '
                        f'{self.ndim}')
-    if self.periods:
-      return tuple((lower + (jnp.arange(length) + offset_i) * step)%self.periods[n]
-                   for n, ((lower, _), offset_i, length, step) in enumerate(zip(
-                       self.domain, offset, self.shape, self.step)))
-
-    return tuple(lower + (jnp.arange(length) + offset_i) * step
-                 for (lower, _), offset_i, length, step in zip(
-                     self.domain, offset, self.shape, self.step))
+    axes = []
+    for n, ((lower, _), offset_i, length, step) in enumerate(zip(self.domain, offset, self.shape, self.step)):
+      if self.periods[n] is not None:
+        axes.append((lower + (jnp.arange(length) + offset_i) * step)%self.periods[n])
+      else:
+        axes.append(lower + (jnp.arange(length) + offset_i) * step)
+    return tuple(axes)
+  
 
   def fft_axes(self) -> Tuple[Array, ...]:
     """Returns the ordinal frequencies corresponding to the axes.
@@ -783,21 +791,26 @@ class Grid:
     return GridArray(fn(*self.mesh(offset)), offset, self)
 
 
-  def subgrid(self,index: tuple[int,int], boundary_layer_widths: tuple[int, int]=(0,0)):#, boundary_conditions: tuple[str,str]=('periodic', 'periodic')):
+  def subgrid(self,index: tuple[int,int], boundary_layer_widths: tuple[int, int]=(0,0)):
+    """
+    Create a subgrid of `Grid` for the index `index` on a device-mesh given by Grid.device_mesh.
+    Grid shape has to be divisble by Grid.device_mesh.axis_sizes.
+
+    """
+
     mesh_shape = self.device_mesh.axis_sizes
-    axis_grid_points = [jnp.linspace(*self.domain[n], self.shape[n] + 1) for n in range(self.ndim)]
+    for i, s in zip(index, mesh_shape):
+      if i >= s:
+        raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
     sub_domain = []
     subdomain_shape = []
     for n in range(self.ndim):
       s = mesh_shape[n]
       stride = self.shape[n]//s
       subdomain_shape.append(stride + 2 * boundary_layer_widths[n])
-      #if boundary_conditions[n] == 'open':
-      sub_domain.append((axis_grid_points[n][index[n]*stride]-self.step[n]*boundary_layer_widths[n], axis_grid_points[n][(index[n]+1)*stride]+self.step[n]*boundary_layer_widths[n]))
-      #elif boundary_conditions[n] == 'periodic':
-      #  sub_domain.append((axis_grid_points[n][index[n]*stride-boundary_layer_widths[n]-jnp.int32(index[n]==0)], axis_grid_points[n][((index[n]+1)*stride+boundary_layer_widths[n])%self.shape[n]]))
-      #else:
-      #  raise ValueError(f'unsupported boundary condition {boundary_condition}')
+      sub_domain.append(
+        (self.domain[n][0]-boundary_layer_widths[n]*self.step[n] + self.step[n]*(stride *index[n]), self.domain[n][0]+boundary_layer_widths[n]*self.step[n] + self.step[n]*(stride *(index[n]+1)))
+      )
       subgrid = Grid(shape=subdomain_shape, domain = sub_domain, periods=self.periods)
     return subgrid
 
