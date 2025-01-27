@@ -173,6 +173,14 @@ def laplacian_matrix(size: int, step: float) -> np.ndarray:
   column[1] = column[-1] = 1 / step**2
   return scipy.linalg.circulant(column)
 
+def laplacian_column(size: int, step: float) -> np.ndarray:
+  """Create 1D Laplacian operator matrix, with periodic BC."""
+  step = float(step) # mganahl: Grid now uses a jax.Array type for `step`
+  column = np.zeros(size)
+  column[0] = -2 / step**2
+  column[1] = column[-1] = 1 / step**2
+  return column
+
 def laplacian_matrix_neumann(size: int, step: float) -> np.ndarray:
   """Create 1D Laplacian operator matrix, with homogeneous Neumann BC."""
   column = np.zeros(size)

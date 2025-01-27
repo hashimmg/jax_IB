@@ -275,7 +275,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
     else:
       raise ValueError('invalid boundary type')
 
-    return GridArray(data, tuple(offset), u.grid)
+    return GridArray(data, tuple(offset), u.grid, u.width)
 
   def _trim(
       self,
@@ -303,7 +303,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
     data = lax.slice_in_dim(u.data, padding[0], limit_index, axis=axis)
     offset = list(u.offset)
     offset[axis] += padding[0]
-    return GridArray(data, tuple(offset), u.grid)
+    return GridArray(data, tuple(offset), u.grid, u.width)
 
   def _trim_padding(self, u: grids.GridArray, axis=0):
     """Trim all padding from a GridArray.

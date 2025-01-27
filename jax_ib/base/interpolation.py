@@ -53,7 +53,8 @@ def _linear_along_axis(c: GridVariable,
     return grids.GridVariable(
         array=grids.GridArray(data=c.shift(int(offset_delta), axis).data,
                               offset=new_offset,
-                              grid=c.grid),
+                              grid=c.grid,
+                              width=c.width),
         bc=c.bc)
   floor = int(np.floor(offset_delta))
   ceil = int(np.ceil(offset_delta))
@@ -62,7 +63,7 @@ def _linear_along_axis(c: GridVariable,
   data = (floor_weight * c.shift(floor, axis).data +
           ceil_weight * c.shift(ceil, axis).data)
   return grids.GridVariable(
-      array=grids.GridArray(data, new_offset, c.grid), bc=c.bc)
+      array=grids.GridArray(data, new_offset, c.grid, c.width), bc=c.bc)
 
 
 def linear(
@@ -142,7 +143,8 @@ def upwind(
     return grids.GridVariable(
         array=grids.GridArray(data=c.shift(int(offset_delta), axis).data,
                               offset=offset,
-                              grid=grids.consistent_grid(c, u)),
+                              grid=grids.consistent_grid(c, u),
+                              width=c.width),
         bc=c.bc)
 
   floor = int(np.floor(offset_delta))
@@ -152,7 +154,7 @@ def upwind(
   )
   grid = grids.consistent_grid(c, u)
   return grids.GridVariable(
-      array=grids.GridArray(array.data, offset, grid),
+      array=grids.GridArray(array.data, offset, grid, array.width),
       bc=boundaries.periodic_boundary_conditions(grid.ndim))
 
 
@@ -218,7 +220,7 @@ def lax_wendroff(
   array = grids.where(u.array > 0, positive_u_case, negative_u_case)
   grid = grids.consistent_grid(c, u)
   return grids.GridVariable(
-      array=grids.GridArray(array.data, offset, grid),
+      array=grids.GridArray(array.data, offset, grid, array.width),
       bc=boundaries.periodic_boundary_conditions(grid.ndim))
 
 
@@ -289,15 +291,15 @@ def apply_tvd_limiter(
         negative_u_r = safe_div(c_next_right.data - c_right.data,
                                 c_right.data - c.data)
         positive_u_phi = grids.GridArray(
-            limiter(positive_u_r), c_low.offset, c.grid)
+            limiter(positive_u_r), c_low.offset, c.grid, c.width)
         negative_u_phi = grids.GridArray(
-            limiter(negative_u_r), c_low.offset, c.grid)
+            limiter(negative_u_r), c_low.offset, c.grid, c.width)
         u = v[axis]
         phi = grids.applied(jnp.where)(
             u.array > 0, positive_u_phi, negative_u_phi)
         c_interpolated = c_low.array - (c_low.array - c_high.array) * phi
         c = grids.GridVariable(
-            grids.GridArray(c_interpolated.data, interpolation_offset, c.grid),
+            grids.GridArray(c_interpolated.data, interpolation_offset, c.grid, c.width),
             c.bc)
     return c
 

@@ -19,6 +19,7 @@ from typing import Callable, Optional, Sequence, Union
 import jax
 from jax import lax
 import jax.numpy as jnp
+from jax_ib.base import fft
 import numpy as np
 
 
@@ -257,3 +258,43 @@ def pseudoinverse(
   return transform(func, operators, dtype, hermitian=hermitian,
                    circulant=circulant, implementation=implementation,
                    precision=precision)
+
+
+def pseudo_poisson_inversion(
+    eigenvalues: jax.Array,
+    dtype: jnp.dtype,
+    axis_names:tuple[str],
+    cutoff: Optional[float] = None,
+) -> Callable[[Array], Array]:
+  """Invert a linear operator written as a sum of operators on each axis.
+
+  Args:
+    operators: forward linear operators as matrices, applied along each axis.
+      Each of these matrices is diagonalized.
+    dtype: dtype of the right-hand-side.
+    hermitian: whether or not all linear operator are Hermitian (i.e., symmetric
+      in the real valued case).
+    circulant: whether or not all linear operators are circulant.
+    implementation: how to implement fast diagonalization.
+    precision: numerical precision for matrix multplication. Only relevant on
+      TPUs.
+    cutoff: eigenvalues with absolute value smaller than this number are
+      discarded rather than being inverted. By default, uses 10 times floating
+      point epsilon.
+
+  Returns:
+    A function that computes the pseudo-inverse of the indicated operator.
+  """
+  if cutoff is None:
+    cutoff = 10 * jnp.finfo(dtype).eps
+
+  def func(v):
+    return jnp.where(abs(v) > cutoff, 1 / v, 0)
+
+  """Fast diagonalization by Fast Fourier Transform."""
+  diagonal = func(eigenvalues)
+  def apply(rhs: Array) -> Array:
+    return fft.ifft_2d(diagonal * fft.fft_2d(rhs, axis_names), axis_names).astype(dtype)
+  return apply
+
+

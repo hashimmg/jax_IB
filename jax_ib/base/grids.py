@@ -104,8 +104,8 @@ class BCArray(np.lib.mixins.NDArrayOperatorsMixin):
       return tuple(BCArray(r) for r in result)
     else:
       return BCArray(result)
-#register_pytree_node_class
-@jax.tree_util.Partial(register_dataclass, data_fields =['data'], meta_fields = ['offset','grid'])
+
+@jax.tree_util.Partial(register_dataclass, data_fields =['data'], meta_fields = ['offset','grid', 'width'])
 @dataclasses.dataclass
 class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   """Data with an alignment offset and an associated grid.
@@ -132,15 +132,17 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   data: Array
   offset: Tuple[float, ...]
   grid: Grid
+  width: int
   def __repr__(self):
     prefix = '    '
     offsetrepr = textwrap.indent(f"offset: {repr(self.offset)}", prefix=prefix)
     repr_string = f"GridArray\n{textwrap.indent(repr(self.data),prefix = prefix)}\n{textwrap.indent(repr(self.grid), prefix=prefix)}\n{offsetrepr}"
     return repr_string
+
   def tree_flatten(self):
     """Returns flattening recipe for GridArray JAX pytree."""
     children = (self.data,)
-    aux_data = (self.offset, self.grid)
+    aux_data = (self.offset, self.grid, self.width)
     return children, aux_data
 
   @classmethod
@@ -155,6 +157,7 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
   @property
   def shape(self) -> Tuple[int, ...]:
     return self.data.shape
+
 
   _HANDLED_TYPES = (numbers.Number, np.ndarray, jax.Array,
                     core.ShapedArray, jax.core.Tracer)
@@ -177,9 +180,34 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
     grid = consistent_grid(*[x for x in inputs if isinstance(x, GridArray)])
     #grid = inputs.grid#consistent_grid(*[x for x in inputs])
     if isinstance(result, tuple):
-      return tuple(GridArray(r, offset, grid) for r in result)
+      return tuple(GridArray(r, offset, grid, self.width) for r in result)
     else:
-      return GridArray(result, offset, grid)
+      return GridArray(result, offset, grid, self.width)
+
+  def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
+    subgrid = self.grid.subgrid(mesh_index, width=width)
+    return GridArray(self.data, self.offset, subgrid, width=0)
+
+  def shard_pad(self, width: int=0):
+    if width > 0 and self.width == 0:
+      return GridArray(pad_shard(self.data, width), self.offset, self.grid, width)
+    elif width > 0 and self.width > 0:
+      assert width == self.width
+      return GridArray(update_padding_layer(self.data, width), self.offset, self.grid, width)
+    elif width == 0:
+      return GridArray(self.data,self.offset, self.grid, width)
+    else:
+      raise ValueError(f"unsupported value of width = {width}")
+
+  def crop(self, width:int=0):
+    if self.width == width:
+      return GridArray(self.data[width:-width,width:-width],self.offset, self.grid, width=0)
+    elif self.width == 0:
+      return GridArray(self.data,self.offset, self.grid, width=0)
+    else:
+      raise ValueError(f"found self.width = {self.width}, which is incompatible with width = {width}")
+
+
 
 
 GridArrayVector = Tuple[GridArray, ...]
@@ -220,9 +248,6 @@ class BoundaryConditions:
       dimension `i`.
   """
   types: Tuple[Tuple[str, str], ...]
-
-
-
 
   def shift(
       self,
@@ -333,8 +358,7 @@ class BoundaryConditions:
         'impose_bc() not implemented in BoundaryConditions base class.')
 
 
-#@register_pytree_node_class
-@jax.tree_util.Partial(register_dataclass, data_fields =['array','bc'], meta_fields=[])
+@jax.tree_util.Partial(register_dataclass, data_fields =['array'], meta_fields=['bc'])
 @dataclasses.dataclass
 class GridVariable:
   """Associates a GridArray with BoundaryConditions.
@@ -399,6 +423,10 @@ class GridVariable:
   def grid(self) -> Grid:
     return self.array.grid
 
+  @property
+  def width(self) -> int:
+    return self.array.width
+  
   def shift(
       self,
       offset: int,
@@ -453,6 +481,15 @@ class GridVariable:
     """
     return self.bc.trim_boundary(self.array)
 
+  def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
+    return GridVariable(self.array.to_subgrid(mesh_index, width), self.bc)
+
+  def shard_pad(self, width:int=0):
+    return GridVariable(self.array.shard_pad(width), self.bc)
+
+  def crop(self, width:int=0):
+    return GridVariable(self.array.crop(width), self.bc)
+
   def impose_bc(self) -> GridVariable:
     """Returns the GridVariable with edge BC enforced, if applicable.
 
@@ -502,7 +539,7 @@ def applied(func):
         k: v.data if isinstance(v, GridArray) else v for k, v in kwargs.items()
     }
     data = func(*raw_args, **raw_kwargs)
-    return GridArray(data, offset, grid)
+    return GridArray(data, offset, grid,args[0].width)
 
   return wrapper
 
@@ -617,7 +654,8 @@ class Grid:
       step: Optional[Union[float, Sequence[float]]] = None,
       domain: Optional[Union[float, Sequence[Tuple[float, float]]]] = None,
       periods: Optional[tuple[float, float]] = None,
-      device_mesh:Optional[jax._src.mesh.Mesh] = None
+      device_mesh:Optional[jax._src.mesh.Mesh] = None,
+      dtype = jnp.float64
   ):
     """Construct a grid object."""
     shape = tuple(operator.index(s) for s in shape)
@@ -638,7 +676,7 @@ class Grid:
           if len(bounds) != 2:
             raise ValueError(
                 f'domain is not sequence of pairs of numbers: {domain}')
-      domain = tuple((jnp.float32(lower), jnp.float32(upper)) for lower, upper in domain)
+      domain = tuple((jnp.astype(lower, dtype), jnp.astype(upper, dtype)) for lower, upper in domain)
 
     else:
       if step is None:
@@ -664,6 +702,7 @@ class Grid:
           raise ValueError(f"grid shape {self.shape} is not integer divisible"
                            f"by a device-mesh shape {mesh_shape}")
       object.__setattr__(self, 'device_mesh', device_mesh)
+    object.__setattr__(self, 'dtype', dtype)
 
   @property
   def ndim(self) -> int:
@@ -685,7 +724,7 @@ class Grid:
   def stagger(self, v: Tuple[Array, ...]) -> Tuple[GridArray, ...]:
     """Places the velocity components of `v` on the `Grid`'s cell faces."""
     offsets = self.cell_faces
-    return tuple(GridArray(u, o, self) for u, o in zip(v, offsets))
+    return tuple(GridArray(u, o, self, 0) for u, o in zip(v, offsets))
 
   def center(self, v: PyTree) -> PyTree:
     """Places all arrays in the pytree `v` at the `Grid`'s cell center."""
@@ -710,12 +749,12 @@ class Grid:
                        f'{self.ndim}')
     axes = []
     for n, ((lower, _), offset_i, length, step) in enumerate(zip(self.domain, offset, self.shape, self.step)):
-      if self.periods[n] is not None:
+      if self.periods:
         axes.append((lower + (jnp.arange(length) + offset_i) * step)%self.periods[n])
       else:
         axes.append(lower + (jnp.arange(length) + offset_i) * step)
     return tuple(axes)
-  
+
 
   def fft_axes(self) -> Tuple[Array, ...]:
     """Returns the ordinal frequencies corresponding to the axes.
@@ -788,10 +827,10 @@ class Grid:
     """
     if offset is None:
       offset = self.cell_center
-    return GridArray(fn(*self.mesh(offset)), offset, self)
+    return GridArray(fn(*self.mesh(offset)), offset, self, 0)
 
 
-  def subgrid(self,index: tuple[int,int], boundary_layer_widths: tuple[int, int]=(0,0)):
+  def subgrid(self,index: tuple[int,int], width: int=0):
     """
     Create a subgrid of `Grid` for the index `index` on a device-mesh given by Grid.device_mesh.
     Grid shape has to be divisble by Grid.device_mesh.axis_sizes.
@@ -799,21 +838,72 @@ class Grid:
     """
 
     mesh_shape = self.device_mesh.axis_sizes
-    for i, s in zip(index, mesh_shape):
-      if i >= s:
-        raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
+    # for i, s in zip(index, mesh_shape):
+    #   if i >= s:
+    #     raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
     sub_domain = []
     subdomain_shape = []
     for n in range(self.ndim):
       s = mesh_shape[n]
       stride = self.shape[n]//s
-      subdomain_shape.append(stride + 2 * boundary_layer_widths[n])
+      subdomain_shape.append(stride + 2 * width)
       sub_domain.append(
-        (self.domain[n][0]-boundary_layer_widths[n]*self.step[n] + self.step[n]*(stride *index[n]), self.domain[n][0]+boundary_layer_widths[n]*self.step[n] + self.step[n]*(stride *(index[n]+1)))
+        (self.domain[n][0]-width*self.step[n] + self.step[n]*(stride *index[n]), self.domain[n][0]+width*self.step[n] + self.step[n]*(stride *(index[n]+1)))
       )
       subgrid = Grid(shape=subdomain_shape, domain = sub_domain, periods=self.periods)
     return subgrid
 
+def pad_shard(array: jax.Array, width: int)->jax.Array:
+  """
+  Collective function exchanging information between neighboring patches on the device grid.
+  `array` is the local shard of the global jax.Array of a field variable.
+  `array` gets padded with a padding layer of width `width` in x and y direction with values
+  from the neighboring cells (top, bottom and corners) s.t. the local arrays have overlapping 
+  regions of width `width`.
+
+  Args:
+    array: The local shard of the global array
+    width: padding width.
+
+  Returns:
+    jax.Array
+  """
+
+  I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j') # mganahl: a bit dirty
+  left_neighbors = jax.lax.ppermute(array[:,-width:], 'j', [(j, (j + 1) % J) for j in range(J)])
+  right_neighbors = jax.lax.ppermute(array[:,:width], 'j', [(j, (j - 1) % J) for j in range(J)])
+  extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[:width,:], right_neighbors[:width,:]], axis=1)
+  extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-width:,:],right_neighbors[-width:,:]],axis=1)
+  upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
+  lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
+  temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
+  return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
+
+
+def update_padding_layer(array: jax.Array, width: int) -> jax.Array:
+  """
+  Collective function exchanging information between neighboring patches on the device grid.
+  `array` is the local, padded shard of the global jax.Array of a field variable.
+  the padding layer of `array` gets updated with with values from the neighboring cells
+  (top, bottom and corners) s.t. the local arrays have overlapping regions of width `width`.
+
+  Args:
+    array: The local shard of the global array
+    width: padding width.
+
+  Returns:
+    jax.Array
+  """
+
+  I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j') # mganahl: a bit dirty
+  left_neighbors = jax.lax.ppermute(array[width:-width,-2*width:-width], 'j', [(j, (j + 1) % J) for j in range(J)])
+  right_neighbors = jax.lax.ppermute(array[width:-width,width:2*width], 'j', [(j, (j - 1) % J) for j in range(J)])
+  extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[width:2*width,width:-width], right_neighbors[:width,:]], axis=1)
+  extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-2*width:-width,width:-width],right_neighbors[-width:,:]],axis=1)
+  upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
+  lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
+  temp = jnp.concatenate([left_neighbors, array[width:-width, width:-width], right_neighbors], axis=1)
+  return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
 
 def domain_interior_masks(grid: Grid):

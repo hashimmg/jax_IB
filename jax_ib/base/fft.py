@@ -151,6 +151,7 @@ def _ifft1d_j(array: jax.Array, axis_name: str)-> jax.Array:
 
     return _get_fft_j(axis_name, BWD)(array)
 
+
 def fft(array: jax.Array, axis:int, axis_name:str):
     """
     Compute the 1d-FFT of a 2d-array `array` along axis `axis` with name `axis_name`
