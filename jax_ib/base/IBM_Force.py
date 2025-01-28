@@ -132,7 +132,7 @@ def immersed_boundary_force_per_particle(
     dx = ux.grid.step[0]
 
     xp, yp = particle(t)
-    UPx, UPy = jax.jacrev(particle)(t)
+    UPx, UPy = jax.jacfwd(particle)(t)
 
     ux_at_surface = surface_velocity(ux,xp,yp)
     uy_at_surface = surface_velocity(uy,xp,yp)

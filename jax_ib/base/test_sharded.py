@@ -14,6 +14,7 @@ from jax_ib.base import equations, advection, array_utils, boundaries, grids, in
 
 L = 5.0
 domain = ((0,L), (0,L))
+NUM_DEVICES = len(jax.devices())
 
 def ellipse(geometry_params, ntheta=200):
   A = geometry_params[0]
@@ -68,8 +69,10 @@ def axis_names():
 
 @pytest.fixture
 def mesh():
-  return jax.make_mesh((4,2), ('i','j'))
-
+  if NUM_DEVICES == 4:
+    return jax.make_mesh((2,2), ('i','j'))
+  elif NUM_DEVICES == 8:
+    return jax.make_mesh((4,2), ('i','j'))
 def setup_variables(grid):
   bc_fns = [lambda t: 0.0 for _ in range(4)]
   vx_bc=((0.0, 0.0), (0.0, 0.0))
