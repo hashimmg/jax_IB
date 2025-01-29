@@ -637,8 +637,6 @@ def consistent_boundary_conditions(*arrays: GridVariable) -> BoundaryConditions:
   return bc
 
 
-
-#@jax.tree_util.Partial(register_dataclass, data_fields =[], meta_fields = ['shape','step', 'domain', 'periods', 'device_mesh'])
 @dataclasses.dataclass(init=False, frozen=True)
 class Grid:
   """Describes the size and shape for an Arakawa C-Grid.
