@@ -11,9 +11,11 @@ from functools import partial
 import jax_ib.base.fft as fft
 import jax_ib.base.fast_diagonalization as fdiag
 from jax_ib.base import equations, advection, array_utils, boundaries, grids, interpolation, diffusion, pressure as prs, finite_differences as fd, IBM_Force, convolution_functions, particle_class as pc, time_stepping
+import jax_cfd
 
+# global test variables
 L = 5.0
-domain = ((0,L), (0,L))
+
 NUM_DEVICES = len(jax.devices())
 
 def ellipse(geometry_params, ntheta=200):
@@ -126,7 +128,7 @@ def test_explicit_update(mesh, N):
 
   grid = grids.Grid((N, N), domain=((0, L), (0, L)), device_mesh = mesh, periods = (L,L))
   velocities, pressure = setup_variables(grid)
-  explicit_update_fn= equations.navier_stokes_explicit_terms(density, viscosity, dt, grid, convect, diffusion.diffuse, forcing=None)
+  explicit_update_fn= equations.navier_stokes_explicit_terms(density, viscosity, dt, convect, diffusion.diffuse, forcing=None)
   expected = explicit_update_fn(velocities)
   actual = explicit_update_distributed(velocities, 1, dt)
   [np.testing.assert_allclose(a.data, e.data) for a, e in zip(actual, expected)]
@@ -334,7 +336,7 @@ def test_update_step(mesh, N, num_steps, obj_fns):
         grids.GridArray(u, os, pressure.grid.subgrid((i, j)), width=0), v.bc) for os, u, v in zip(subgrid.cell_faces, local_u_star, velocities)])
 
     forces = IBM_Force.immersed_boundary_force(
-        local_u_star,obj_fns,convolution_functions.gaussian,surface_velocity, t, dt)
+      local_u_star,obj_fns,convolution_functions.gaussian,surface_velocity, t, dt)
 
     local_u_star_star = tuple([u.data + dt * force.data for u, force in zip(local_u_star, forces)])
     local_u_star_star = tuple([grids.GridVariable(
@@ -386,7 +388,7 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn):
   viscosity = 0.05
   dt=1e-4
 
-  domain = ((0.0,15.),(0.0,15.0))
+  domain = ((0.0,L),(0.0,L))
   size=(N,N)
   grid = grids.Grid(size, domain=domain, device_mesh = mesh, periods = (15.0,15.0), dtype=jnp.float64)
 
@@ -430,14 +432,14 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn):
           dt=dt,
           grid=grid,
           convect=convect,
-          pressure_solve= pressure.solve_fast_diag, #only works for periodic boundary conditions
+          pressure_solve= prs.solve_fast_diag, #only works for periodic boundary conditions
           forcing=None, #pfo.arbitrary_obstacle(flow_cond.pressure_gradient,perm_f),
           time_stepper= time_stepping.forward_euler_updated, #use runge-kutta , and keep it like that
           IBM_forcing = IBM_forcing, #compute the forcing term to update the particle
           Drag_fn = internal_post_processing, ### TO be removed from the example
           )
-  step_fn = cfd.funcutils.repeated(single_step, steps=inner_steps)
-  rollout_fn = cfd.funcutils.trajectory(
+  step_fn = jax_cfd.base.funcutils.repeated(single_step, steps=inner_steps)
+  rollout_fn = jax_cfd.base.funcutils.trajectory(
           step_fn, outer_steps, start_with_input=True)
   final_result, _ = jax.device_get(rollout_fn(all_variables))
   np.testing.assert_allclose(p.data, final_result.pressure.data)
