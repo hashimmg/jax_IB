@@ -336,7 +336,7 @@ def test_update_step(mesh, N, num_steps, obj_fns):
         grids.GridArray(u, os, pressure.grid.subgrid((i, j)), width=0), v.bc) for os, u, v in zip(subgrid.cell_faces, local_u_star, velocities)])
 
     forces = IBM_Force.immersed_boundary_force(
-      local_u_star,obj_fns,convolution_functions.gaussian,surface_velocity, t, dt)
+        local_u_star,obj_fns,convolution_functions.gaussian,surface_velocity, t, dt)
 
     local_u_star_star = tuple([u.data + dt * force.data for u, force in zip(local_u_star, forces)])
     local_u_star_star = tuple([grids.GridVariable(
