@@ -42,13 +42,11 @@ def navier_stokes_explicit_terms(
     density: float,
     viscosity: float,
     dt: float,
-    grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
     forcing: Optional[ForcingFn] = None,
 ) -> Callable[[GridVariableVector], GridVariableVector]:
   """Returns a function that performs a time step of Navier Stokes."""
-  del grid  # unused
 
   if convect is None:
     def convect(v:tuple[GridVariable]):  # pylint: disable=function-redefined
@@ -213,7 +211,6 @@ def semi_implicit_navier_stokes_timeBC(
       density=density,
       viscosity=viscosity,
       dt=dt,
-      grid=grid,
       convect=convect,
       diffuse=diffuse,
       forcing=forcing)
@@ -258,7 +255,6 @@ def semi_implicit_navier_stokes_penalty(
       density=density,
       viscosity=viscosity,
       dt=dt,
-      grid=grid,
       convect=convect,
       diffuse=diffuse,
       forcing=forcing)

@@ -155,6 +155,23 @@ class All_Variables:
        """Returns unflattening recipe for GridVariable JAX pytree."""
        return cls(*children) 
 
+@register_pytree_node_class
+@dataclasses.dataclass
+class VariableContiner:
+    velocity: grids.GridVariableVector
+    pressure: grids.GridVariable
+    time: float
+    def tree_flatten(self):
+      """Returns flattening recipe for GridVariable JAX pytree."""
+      children = (self.velocity,self.pressure,self.Drag,self.Step_count,self.MD_var, self.time)
+      aux_data = None
+      return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+       """Returns unflattening recipe for GridVariable JAX pytree."""
+       return cls(*children) 
+
 
 
 @register_pytree_node_class

@@ -10,7 +10,7 @@ import functools
 from functools import partial
 import jax_ib.base.fft as fft
 import jax_ib.base.fast_diagonalization as fdiag
-from jax_ib.base import equations, advection, array_utils, boundaries, grids, interpolation, diffusion, pressure as prs, finite_differences as fd, IBM_Force, convolution_functions
+from jax_ib.base import equations, advection, array_utils, boundaries, grids, interpolation, diffusion, pressure as prs, finite_differences as fd, IBM_Force, convolution_functions, particle_class as pc, time_stepping
 
 L = 5.0
 domain = ((0,L), (0,L))
@@ -73,6 +73,7 @@ def mesh():
     return jax.make_mesh((2,2), ('i','j'))
   elif NUM_DEVICES == 8:
     return jax.make_mesh((4,2), ('i','j'))
+
 def setup_variables(grid):
   bc_fns = [lambda t: 0.0 for _ in range(4)]
   vx_bc=((0.0, 0.0), (0.0, 0.0))
@@ -96,7 +97,7 @@ def setup_variables(grid):
   )
 
   pressure = grids.GridVariable(
-    grid.eval_on_mesh(fn = lambda x, y: jnp.cos(x+y), offset = grid.cell_center),  boundaries.get_pressure_bc_from_velocity(velocities))
+    grid.eval_on_mesh(fn = lambda x, y: 1+jnp.cos(x+y), offset = grid.cell_center),  boundaries.get_pressure_bc_from_velocity(velocities))
   return velocities, pressure
 
 
@@ -113,11 +114,10 @@ def test_explicit_update(mesh, N):
   def explicit_update_distributed(velocities, width,dt):
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
-    subgrid = velocities[0].grid.subgrid((i,j), width=width)
     explicit_update = equations.navier_stokes_explicit_terms(
-        density=1.0, viscosity=1.0, dt=dt,grid=subgrid, convect=convect, diffuse=diffusion.diffuse, forcing=None)
+        density=1.0, viscosity=1.0, dt=dt, convect=convect, diffuse=diffusion.diffuse, forcing=None)
 
-    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
+    local_velocities = tuple([u.to_subgrid((i,j)).shard_pad(width) for u in velocities])
     return tuple([e.crop(width) for e in explicit_update(local_velocities)])
 
   dt=5E-4
@@ -139,7 +139,7 @@ def test_advect(mesh, N):
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
 
-    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
+    local_velocities = tuple([u.to_subgrid((i,j)).shard_pad(width) for u in velocities])
     result = convect(local_velocities)
     return tuple([e.crop(width) for e in convect(local_velocities)])
 
@@ -159,7 +159,7 @@ def test_laplacian(mesh, N):
   def laplacian_distributed(variable,width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
+      local_variable = variable.to_subgrid((i,j)).shard_pad(width)
       return fd.laplacian(local_variable).crop(width)
 
   L = 5.0
@@ -177,7 +177,7 @@ def test_divergence(mesh, N):
   def divergence_distributed(velocities,width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
+      local_velocities = tuple([u.to_subgrid((i,j)).shard_pad(width) for u in velocities])
       return fd.divergence(local_velocities).crop(width)
 
   L = 5.0
@@ -195,7 +195,7 @@ def test_diffuse(mesh, N, viscosity=0.05):
   def diffuse_distributed(variable, viscosity, width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
+      local_variable = variable.to_subgrid((i,j)).shard_pad(width)
       return diffusion.diffuse(local_variable, viscosity).crop(width)
 
   L = 5.0
@@ -213,7 +213,7 @@ def test_linear_interpolation(mesh, N):
   def linear_interpolation_distributed(variable, target_offset, width):
       i = jax.lax.axis_index('i')
       j = jax.lax.axis_index('j')
-      local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
+      local_variable = variable.to_subgrid((i,j)).shard_pad(width)
       return interpolation.linear(local_variable, target_offset,None,None).crop(width)
 
   L = 5.0
@@ -234,8 +234,8 @@ def test_upwind_interpolation(mesh, N):
     #create a subgrid for the current patch
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
-    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
-    local_variable = variable.to_subgrid((i,j), width).shard_pad(width)
+    local_velocities = tuple([u.to_subgrid((i,j)).shard_pad(width) for u in velocities])
+    local_variable = variable.to_subgrid((i,j)).shard_pad(width)
     return interpolation.upwind(local_variable, offset,local_velocities, None).crop(width)
 
 
@@ -258,7 +258,7 @@ def test_convolve(mesh, N, obj_fn):
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
 
-    local_variable = variable.to_subgrid((i,j), width=0)
+    local_variable = variable.to_subgrid((i,j))
     local_convolve = convolution_functions.mesh_convolve(
         local_variable, x, y,
         convolution_functions.gaussian, axis_names=['i','j']
@@ -281,7 +281,7 @@ def test_immersed_boundary_force(mesh, N, obj_fns):
     i = jax.lax.axis_index('i')
     j = jax.lax.axis_index('j')
 
-    local_velocities = tuple([u.to_subgrid((i,j), width=0) for u in velocities])
+    local_velocities = tuple([u.to_subgrid((i,j)) for u in velocities])
     surface_velocity = lambda f,x,y: convolution_functions.mesh_convolve(f,x,y,convolution_functions.gaussian, axis_names=['i','j'])
 
     forcex, forcey = IBM_Force.immersed_boundary_force(
@@ -302,7 +302,7 @@ def test_immersed_boundary_force(mesh, N, obj_fns):
 
 @pytest.mark.parametrize("N", [64])
 @pytest.mark.parametrize("num_steps", [10,1000])
-def test_update_step_step(mesh, N, num_steps, obj_fns):
+def test_update_step(mesh, N, num_steps, obj_fns):
   @partial(shard_map, mesh=mesh, in_specs=(P('i','j'),(P('i','j'), P('i','j')),(P('i'), P('j')),None,None,None),
            out_specs=(P('i','j'), P('i','j')))
   def update_step_sharded(pressure, velocities,laplacian_eigenvalues, width, num_steps,dt):
@@ -313,10 +313,10 @@ def test_update_step_step(mesh, N, num_steps, obj_fns):
     def convect(v):
       return tuple(advection.advect_upwind(u, v, dt) for u in v)
 
-    subgrid = pressure.grid.subgrid((i, j), width)
+    subgrid = pressure.grid.subgrid((i, j))
 
     explicit_update = equations.navier_stokes_explicit_terms(
-        density=1.0, viscosity=1.0, dt=5E-4,grid=subgrid, convect=convect, diffuse=diffusion.diffuse, forcing=None)
+        density=1.0, viscosity=1.0, dt=5E-4,convect=convect, diffuse=diffusion.diffuse, forcing=None)
 
 
     surface_velocity = lambda f,x,y: convolution_functions.mesh_convolve(f,x,y,convolution_functions.gaussian, axis_names=['i','j'])
@@ -325,13 +325,13 @@ def test_update_step_step(mesh, N, num_steps, obj_fns):
     eigvals = jnp.add.outer(laplacian_eigenvalues[0], laplacian_eigenvalues[1].T)
     pinv = fdiag.pseudo_poisson_inversion(eigvals, jnp.complex128, ('i','j'), cutoff)
 
-    local_pressure = pressure.to_subgrid((i,j), width).shard_pad(width)
-    local_velocities = tuple([u.to_subgrid((i,j), width).shard_pad(width) for u in velocities])
+    local_pressure = pressure.to_subgrid((i,j)).shard_pad(width)
+    local_velocities = tuple([u.to_subgrid((i,j)).shard_pad(width) for u in velocities])
     explicit = tuple([v.crop(width) for v in explicit_update(local_velocities)])
     dP = tuple([dp.crop(width) for dp in fd.forward_difference(local_pressure)])
     local_u_star = tuple([u.crop(width).data + dt * e.data - dp.data for u, e, dp in zip(local_velocities, explicit, dP)])
     local_u_star = tuple([grids.GridVariable(
-        grids.GridArray(u, os, pressure.grid.subgrid((i, j), 0), width=0), v.bc) for os, u, v in zip(subgrid.cell_faces, local_u_star, velocities)])
+        grids.GridArray(u, os, pressure.grid.subgrid((i, j)), width=0), v.bc) for os, u, v in zip(subgrid.cell_faces, local_u_star, velocities)])
 
     forces = IBM_Force.immersed_boundary_force(
         local_u_star,obj_fns,convolution_functions.gaussian,surface_velocity, t, dt)
@@ -339,7 +339,7 @@ def test_update_step_step(mesh, N, num_steps, obj_fns):
     local_u_star_star = tuple([u.data + dt * force.data for u, force in zip(local_u_star, forces)])
     local_u_star_star = tuple([grids.GridVariable(
         grids.GridArray(
-          u, offset,  pressure.grid.subgrid((i, j), 1), width=0), v.bc) for u, v, offset in zip(local_u_star_star, velocities, subgrid.cell_faces)])
+          u, offset,  pressure.grid.subgrid((i, j)), width=0), v.bc) for u, v, offset in zip(local_u_star_star, velocities, subgrid.cell_faces)])
     local_u_projected, local_pressure = prs.projection_and_update_pressure_sharded(local_pressure.crop(width), local_u_star_star, pinv,width)
     return local_u_projected, local_pressure
 
@@ -355,7 +355,7 @@ def test_update_step_step(mesh, N, num_steps, obj_fns):
   grid = pressure.grid
 
   explicit_update = equations.navier_stokes_explicit_terms(
-      density=1.0, viscosity=1.0, dt=5E-4,grid=grid, convect=convect, diffuse=diffusion.diffuse, forcing=None)
+      density=1.0, viscosity=1.0, dt=5E-4,convect=convect, diffuse=diffusion.diffuse, forcing=None)
   t = num_steps * dt
   explicit = explicit_update(velocities)
   dP = fd.forward_difference(pressure)
@@ -369,9 +369,77 @@ def test_update_step_step(mesh, N, num_steps, obj_fns):
   u_star_star = tuple([u.data + dt * force.data for u, force in zip(u_star, forces)])
   u_star_star = tuple([grids.GridVariable(
       grids.GridArray(u, offset,  pressure.grid, width=0), v.bc) for u, v, offset in zip(u_star_star, velocities, grid.cell_faces)])
-  u_expected, p_expected = prs.projection_and_update_pressure(pressure, u_star_star) 
+  u_expected, p_expected = prs.projection_and_update_pressure(pressure, u_star_star)
 
   eigvals = tuple([np.fft.fft(array_utils.laplacian_column(size, step)) for size, step in zip(grid.shape, grid.step)]) 
-  u_actual, p_actual = update_step_sharded(pressure, velocities,eigvals, 1, num_steps,dt) 
+  u_actual, p_actual = update_step_sharded(pressure, velocities,eigvals, 1, num_steps,dt)
   [np.testing.assert_allclose(a.data,b.data) for (a,b) in zip(u_actual, u_expected)]
   np.testing.assert_allclose(p_actual.data,p_expected.data, atol=1E-7)
+
+
+@pytest.mark.parametrize("N", [64])
+@pytest.mark.parametrize("inner_steps", [50])
+@pytest.mark.parametrize("outer_steps", [1, 10])
+def test_integration(mesh, N, inner_steps, outer_steps, obj_fn):
+
+  density = 1.0
+  viscosity = 0.05
+  dt=1e-4
+
+  domain = ((0.0,15.),(0.0,15.0))
+  size=(N,N)
+  grid = grids.Grid(size, domain=domain, device_mesh = mesh, periods = (15.0,15.0), dtype=jnp.float64)
+
+  velocities, pressure = setup_variables(grid)
+  all_variables = pc.All_Variables(velocities,pressure,[0],0,[0], 0.0)
+
+  eigvals = tuple([np.fft.fft(array_utils.laplacian_column(size, step)) for size, step in zip(grid.shape, grid.step)]) 
+  def convect(v):
+      return tuple(advection.advect_upwind(u, v, dt) for u in v)
+
+  explicit_update = equations.navier_stokes_explicit_terms(
+      density=density, viscosity=viscosity, dt=dt,convect=convect, diffuse=diffusion.diffuse, forcing=None)
+
+  surface_velocity = lambda f,x,y: convolution_functions.mesh_convolve(f,x,y,convolution_functions.gaussian, axis_names=['i','j'])
+
+  evolve = jax.jit(shard_map(time_stepping.evolve_navier_stokes_sharded,
+                             mesh=mesh, in_specs=(P('i','j'),(P('i','j'), P('i','j')),(P('i'), P('j')),P(),P(),None,None,None, None,None),
+           out_specs=(P('i','j'), (P('i','j'),  P('i','j')))),static_argnums = (4, 5,6,7,8,9))
+
+  ref_time = 0.0
+  p, v = pressure, velocities
+  for step in range(outer_steps):
+    p, v = evolve(p, v,eigvals,ref_time, dt, 1, inner_steps, obj_fn, explicit_update, surface_velocity)
+    ref_time += inner_steps * dt
+
+
+  def internal_post_processing(all_variables,dt):
+      return all_variables
+
+  surf_fn =  lambda field,xp,yp:convolution_functions.convolve(field,xp,yp,convolution_functions.gaussian)
+
+  IBM_forcing = lambda velocities,t,dt: IBM_Force.immersed_boundary_force(velocities,
+                                                                          [obj_fn],
+                                                                          convolution_functions.gaussian,
+                                                                          surf_fn,
+                                                                          t,
+                                                                          dt)
+  single_step = equations.semi_implicit_navier_stokes_timeBC(
+          density=density,
+          viscosity=viscosity,
+          dt=dt,
+          grid=grid,
+          convect=convect,
+          pressure_solve= pressure.solve_fast_diag, #only works for periodic boundary conditions
+          forcing=None, #pfo.arbitrary_obstacle(flow_cond.pressure_gradient,perm_f),
+          time_stepper= time_stepping.forward_euler_updated, #use runge-kutta , and keep it like that
+          IBM_forcing = IBM_forcing, #compute the forcing term to update the particle
+          Drag_fn = internal_post_processing, ### TO be removed from the example
+          )
+  step_fn = cfd.funcutils.repeated(single_step, steps=inner_steps)
+  rollout_fn = cfd.funcutils.trajectory(
+          step_fn, outer_steps, start_with_input=True)
+  final_result, _ = jax.device_get(rollout_fn(all_variables))
+  np.testing.assert_allclose(p.data, final_result.pressure.data)
+  np.testing.assert_allclose(v[0].data, final_result.velocity[0].data)
+  np.testing.assert_allclose(v[1].data, final_result.velocity[1].data)

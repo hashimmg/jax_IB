@@ -1,10 +1,11 @@
 import dataclasses
 from typing import Callable, Sequence, TypeVar
 import jax
+import jax.numpy as jnp
 import tree_math
 from jax_ib.base import boundaries
 from jax_ib.base.particle_class import All_Variables
-from jax_ib.base import grids
+from jax_ib.base import grids, fast_diagonalization, finite_differences, IBM_Force, convolution_functions, pressure as prs
 from jax_cfd.base import time_stepping
 from jax_ib.base import particle_class
 
@@ -133,7 +134,7 @@ def navier_stokes_rk_updated(
   a = tableau.a
   b = tableau.b
   num_steps = len(b)
-
+  update_BC = equation.update_BC
   def step_fn(all_variables: All_Variables):
     u = [None] * num_steps
     k = [None] * num_steps
@@ -161,17 +162,79 @@ def navier_stokes_rk_updated(
       k[i] = explicit_terms(u[i])
 
     # mganahl: why is dP below not multiplied by dt?
-    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP  
+    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP
 
     Force = tree_math.Vector(IBM(u_star.tree, time, dt))
     u_star_star = u_star + dt * Force
 
     u_final, new_pressure = pressure_projection(pressure, u_star_star).tree
     updated_variables = All_Variables(u_final,new_pressure, all_variables.Drag, all_variables.Step_count + 1,all_variables.MD_var, time + dt)
-
     return updated_variables
 
   return step_fn
+
+
+def get_step_fn_sharded(laplacian_eigenvalues, dt, width, obj_fn, explicit_update_fn, surface_velocity_fn):
+    cutoff = 10 * jnp.finfo(jnp.float32).eps
+    eigvals = jnp.add.outer(laplacian_eigenvalues[0], laplacian_eigenvalues[1].T)
+    pinv = fast_diagonalization.pseudo_poisson_inversion(eigvals, jnp.complex128, ('i','j'), cutoff)
+
+    def step_fn(step, args):
+
+      p, us, reference_time = args
+      t = reference_time + step * dt
+
+      local_velocities = tuple([u.shard_pad(width) for u in us])
+      temp = tuple([v.crop(width) for v in explicit_update_fn(local_velocities)])
+
+      del local_velocities
+
+      us[0].array.data += dt * temp[0].data
+      us[1].array.data += dt * temp[1].data
+      local_pressure = p.shard_pad(width)
+      temp = tuple([dp.crop(width) for dp in finite_differences.forward_difference(local_pressure)])
+      del local_pressure
+
+      us[0].array.data -= temp[0].data
+      us[1].array.data -= temp[1].data
+
+      temp = IBM_Force.immersed_boundary_force(
+          us,[obj_fn],convolution_functions.gaussian,surface_velocity_fn, t, dt)
+
+      us[0].array.data += dt*temp[0].data
+      us[1].array.data += dt*temp[1].data
+      del temp
+      local_u_projected, local_pressure = prs.projection_and_update_pressure_sharded(p, us, pinv,width)
+
+      return local_pressure, local_u_projected, reference_time
+
+    return step_fn
+
+
+def evolve_navier_stokes_sharded(
+    pressure, velocities,laplacian_eigenvalues, reference_time, dt, width, num_steps, obj_fn, explicit_update_fn, surface_velocity_fn):
+
+    step_fun = get_step_fn_sharded(laplacian_eigenvalues, dt, width, obj_fn, explicit_update_fn, surface_velocity_fn)
+
+    i = jax.lax.axis_index('i')
+    j = jax.lax.axis_index('j')
+
+    # map quantities to local grid
+    local_pressure = pressure.to_subgrid((i,j))
+    local_velocities = tuple([u.to_subgrid((i,j)) for u in velocities])
+
+    # initial values for for_loop
+    init = (local_pressure, local_velocities, reference_time)
+
+    local_pressure, local_velocities, _ = jax.lax.fori_loop(0, num_steps, step_fun,init)
+
+    # change grids back to global grid
+    local_pressure.array.grid = pressure.grid
+    local_velocities[0].array.grid = velocities[0].grid
+    local_velocities[1].array.grid = velocities[1].grid
+
+    # return results
+    return local_pressure, local_velocities
 
 
 def navier_stokes_rk_penalty(

@@ -511,6 +511,7 @@ def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, t
     Drag = all_variable.Drag
     Step_count = all_variable.Step_count
     MD_var = all_variable.MD_var
+    time = all_variable.time
     bcfn = v[0].bc.boundary_fn
     bcfny = v[1].bc.boundary_fn
 
@@ -522,7 +523,7 @@ def _boundary_update(all_variable: particle_class.All_Variables, time_stamp_1, t
 
     v_updated =  tuple(
       grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
-    return particle_class.All_Variables(v_updated,pressure,Drag,Step_count,MD_var)
+    return particle_class.All_Variables(v_updated,pressure,Drag,Step_count,MD_var, time)
 
 # Convenience utilities to ease updating of BoundaryConditions implementation
 def periodic_boundary_conditions(ndim: int) -> ConstantBoundaryConditions:

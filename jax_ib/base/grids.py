@@ -189,8 +189,15 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
     return GridArray(self.data, self.offset, subgrid, width=0)
 
   def shard_pad(self, width: int=0):
+    #TODO (mganahl): this design isn't great, we'll need to update this
+    # atm we keep track of the padding width in GridArray (poor design)
+    # shard_pad can't do multiple paddings
     if width > 0 and self.width == 0:
-      return GridArray(pad_shard(self.data, width), self.offset, self.grid, width)
+      shape = (self.shape[0] + 2*width, self.shape[1] + 2*width)
+      domain = ((self.grid.domain[0][0] - width*self.grid.step[0], self.grid.domain[0][1] + width*self.grid.step[0]),
+                (self.grid.domain[1][0] - width*self.grid.step[1], self.grid.domain[1][1] + width*self.grid.step[1]))
+      grid = Grid(shape=shape, step=self.grid.step,domain=domain, periods=self.grid.periods)
+      return GridArray(pad_shard(self.data, width), self.offset, grid, width)
     elif width > 0 and self.width > 0:
       assert width == self.width
       return GridArray(update_padding_layer(self.data, width), self.offset, self.grid, width)
@@ -201,7 +208,11 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
 
   def crop(self, width:int=0):
     if self.width == width:
-      return GridArray(self.data[width:-width,width:-width],self.offset, self.grid, width=0)
+      shape = (self.shape[0] - 2*width, self.shape[1] - 2*width)
+      domain = ((self.grid.domain[0][0] - width*self.grid.step[0], self.grid.domain[0][1] + width*self.grid.step[0]),
+                (self.grid.domain[1][0] - width*self.grid.step[1], self.grid.domain[1][1] + width*self.grid.step[1]))
+      grid = Grid(shape=shape, step=self.grid.step, domain=domain, periods=self.grid.periods)
+      return GridArray(self.data[width:-width,width:-width],self.offset, grid, width=0)
     elif self.width == 0:
       return GridArray(self.data,self.offset, self.grid, width=0)
     else:
@@ -415,6 +426,10 @@ class GridVariable:
   def data(self) -> Array:
     return self.array.data
 
+  @data.setter
+  def data(self) -> Array:
+    self.array.data = data
+
   @property
   def offset(self) -> Tuple[float, ...]:
     return self.array.offset
@@ -622,6 +637,8 @@ def consistent_boundary_conditions(*arrays: GridVariable) -> BoundaryConditions:
   return bc
 
 
+
+#@jax.tree_util.Partial(register_dataclass, data_fields =[], meta_fields = ['shape','step', 'domain', 'periods', 'device_mesh'])
 @dataclasses.dataclass(init=False, frozen=True)
 class Grid:
   """Describes the size and shape for an Arakawa C-Grid.
@@ -647,7 +664,7 @@ class Grid:
   domain: Tuple[Tuple[float, float], ...]
   periods: tuple[float, float] = None
   device_mesh: jax._src.mesh.Mesh = None
-
+  dtype = jnp.float64
   def __init__(
       self,
       shape: Sequence[int],
@@ -664,8 +681,13 @@ class Grid:
     object.__setattr__(self, 'periods', periods)
 
     if step is not None and domain is not None:
-      raise TypeError('MODIFIED cannot provide both step and domain')
-    elif domain is not None:
+
+      if isinstance(step, numbers.Number):
+        step = (step,) * self.ndim
+      elif len(step) != self.ndim:
+        raise ValueError('length of step does not match ndim: '
+                         f'{len(step)} != {self.ndim}')
+
       if isinstance(domain, (int, float)):
         domain = ((0, domain),) * len(shape)
       else:
@@ -678,9 +700,22 @@ class Grid:
                 f'domain is not sequence of pairs of numbers: {domain}')
       domain = tuple((jnp.astype(lower, dtype), jnp.astype(upper, dtype)) for lower, upper in domain)
 
-    else:
-      if step is None:
-        step = 1
+    elif domain is not None and step is None:
+      if isinstance(domain, (int, float)):
+        domain = ((0, domain),) * len(shape)
+      else:
+        if len(domain) != self.ndim:
+          raise ValueError('length of domain does not match ndim: '
+                           f'{len(domain)} != {self.ndim}')
+        for bounds in domain:
+          if len(bounds) != 2:
+            raise ValueError(
+                f'domain is not sequence of pairs of numbers: {domain}')
+      domain = tuple((jnp.astype(lower, dtype), jnp.astype(upper, dtype)) for lower, upper in domain)
+      step = tuple(
+        (upper - lower) / size for (lower, upper), size in zip(domain, shape))
+
+    elif domain is None and step is not None:
       if isinstance(step, numbers.Number):
         step = (step,) * self.ndim
       elif len(step) != self.ndim:
@@ -688,11 +723,10 @@ class Grid:
                          f'{len(step)} != {self.ndim}')
       domain = tuple(
           (0.0, float(step_ * size)) for step_, size in zip(step, shape))
+    else:
+      raise TypeError('Need to provide at least step or domain')
 
     object.__setattr__(self, 'domain', domain)
-
-    step = tuple(
-        (upper - lower) / size for (lower, upper), size in zip(domain, shape))
     object.__setattr__(self, 'step', step)
 
     if device_mesh is not None:
@@ -703,6 +737,7 @@ class Grid:
                            f"by a device-mesh shape {mesh_shape}")
       object.__setattr__(self, 'device_mesh', device_mesh)
     object.__setattr__(self, 'dtype', dtype)
+
 
   @property
   def ndim(self) -> int:
