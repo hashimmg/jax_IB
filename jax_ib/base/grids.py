@@ -40,207 +40,251 @@ PyTree = Any
 @register_pytree_node_class
 @dataclasses.dataclass
 class BCArray(np.lib.mixins.NDArrayOperatorsMixin):
-  """Data with an alignment offset and an associated grid.
+    """Data with an alignment offset and an associated grid.
 
-  Offset values in the range [0, 1] fall within a single grid cell.
+    Offset values in the range [0, 1] fall within a single grid cell.
 
-  Examples:
-    offset=(0, 0) means that each point is at the bottom-left corner.
-    offset=(0.5, 0.5) is at the grid center.
-    offset=(1, 0.5) is centered on the right-side edge.
+    Examples:
+      offset=(0, 0) means that each point is at the bottom-left corner.
+      offset=(0.5, 0.5) is at the grid center.
+      offset=(1, 0.5) is centered on the right-side edge.
 
-  Attributes:
-    data: array values.
-    offset: alignment location of the data with respect to the grid.
-    grid: the Grid associated with the array data.
-    dtype: type of the array data.
-    shape: lengths of the array dimensions.
-  """
-  # Don't (yet) enforce any explicit consistency requirements between data.ndim
-  # and len(offset), e.g., so we can feel to add extra time/batch/channel
-  # dimensions. But in most cases they should probably match.
-  # Also don't enforce explicit consistency between data.shape and grid.shape,
-  # but similarly they should probably match.
-  data: Array
+    Attributes:
+      data: array values.
+      offset: alignment location of the data with respect to the grid.
+      grid: the Grid associated with the array data.
+      dtype: type of the array data.
+      shape: lengths of the array dimensions.
+    """
+
+    # Don't (yet) enforce any explicit consistency requirements between data.ndim
+    # and len(offset), e.g., so we can feel to add extra time/batch/channel
+    # dimensions. But in most cases they should probably match.
+    # Also don't enforce explicit consistency between data.shape and grid.shape,
+    # but similarly they should probably match.
+    data: Array
+
+    def tree_flatten(self):
+        """Returns flattening recipe for BCArray JAX pytree."""
+        children = (self.data,)
+        aux_data = None
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """Returns unflattening recipe for BCArray JAX pytree."""
+        return cls(*children)
+
+    @property
+    def dtype(self):
+        return self.data.dtype
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return self.data.shape
+
+    _HANDLED_TYPES = (
+        numbers.Number,
+        np.ndarray,
+        jax.Array,
+        core.ShapedArray,
+        jax.core.Tracer,
+    )
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """Define arithmetic on BCArray using NumPy's mixin."""
+        for x in inputs:
+            if not isinstance(x, self._HANDLED_TYPES + (BCArray,)):
+                return NotImplemented
+        if method != "__call__":
+            return NotImplemented
+        try:
+            # get the corresponding jax.np function to the NumPy ufunc
+            func = getattr(jnp, ufunc.__name__)
+        except AttributeError:
+            return NotImplemented
+        arrays = [x.data if isinstance(x, BCArray) else x for x in inputs]
+        result = func(*arrays)
+        if isinstance(result, tuple):
+            return tuple(BCArray(r) for r in result)
+        else:
+            return BCArray(result)
 
 
-  def tree_flatten(self):
-    """Returns flattening recipe for BCArray JAX pytree."""
-    children = (self.data,)
-    aux_data = None
-    return children, aux_data
-
-  @classmethod
-  def tree_unflatten(cls, aux_data, children):
-    """Returns unflattening recipe for BCArray JAX pytree."""
-    return cls(*children)
-
-  @property
-  def dtype(self):
-    return self.data.dtype
-
-  @property
-  def shape(self) -> Tuple[int, ...]:
-    return self.data.shape
-
-  _HANDLED_TYPES = (numbers.Number, np.ndarray, jax.Array,
-                    core.ShapedArray, jax.core.Tracer)
-
-  def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-    """Define arithmetic on BCArray using NumPy's mixin."""
-    for x in inputs:
-      if not isinstance(x, self._HANDLED_TYPES + (BCArray,)):
-        return NotImplemented
-    if method != '__call__':
-      return NotImplemented
-    try:
-      # get the corresponding jax.np function to the NumPy ufunc
-      func = getattr(jnp, ufunc.__name__)
-    except AttributeError:
-      return NotImplemented
-    arrays = [x.data if isinstance(x, BCArray) else x for x in inputs]
-    result = func(*arrays)
-    if isinstance(result, tuple):
-      return tuple(BCArray(r) for r in result)
-    else:
-      return BCArray(result)
-
-@jax.tree_util.Partial(register_dataclass, data_fields =['data'], meta_fields = ['offset','grid', 'width'])
+@jax.tree_util.Partial(
+    register_dataclass, data_fields=["data"], meta_fields=["offset", "grid", "width"]
+)
 @dataclasses.dataclass
 class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
-  """Data with an alignment offset and an associated grid.
+    """Data with an alignment offset and an associated grid.
 
-  Offset values in the range [0, 1] fall within a single grid cell.
+    Offset values in the range [0, 1] fall within a single grid cell.
 
-  Examples:
-    offset=(0, 0) means that each point is at the bottom-left corner.
-    offset=(0.5, 0.5) is at the grid center.
-    offset=(1, 0.5) is centered on the right-side edge.
+    Examples:
+      offset=(0, 0) means that each point is at the bottom-left corner.
+      offset=(0.5, 0.5) is at the grid center.
+      offset=(1, 0.5) is centered on the right-side edge.
 
-  Attributes:
-    data: array values.
-    offset: alignment location of the data with respect to the grid.
-    grid: the Grid associated with the array data.
-    dtype: type of the array data.
-    shape: lengths of the array dimensions.
-  """
-  # Don't (yet) enforce any explicit consistency requirements between data.ndim
-  # and len(offset), e.g., so we can feel to add extra time/batch/channel
-  # dimensions. But in most cases they should probably match.
-  # Also don't enforce explicit consistency between data.shape and grid.shape,
-  # but similarly they should probably match.
-  data: Array
-  offset: Tuple[float, ...]
-  grid: Grid
-  width: int
-  def __repr__(self):
-    prefix = '    '
-    offsetrepr = textwrap.indent(f"offset: {repr(self.offset)}", prefix=prefix)
-    repr_string = f"GridArray\n{textwrap.indent(repr(self.data),prefix = prefix)}\n{textwrap.indent(repr(self.grid), prefix=prefix)}\n{offsetrepr}"
-    return repr_string
+    Attributes:
+      data: array values.
+      offset: alignment location of the data with respect to the grid.
+      grid: the Grid associated with the array data.
+      dtype: type of the array data.
+      shape: lengths of the array dimensions.
+    """
 
-  def tree_flatten(self):
-    """Returns flattening recipe for GridArray JAX pytree."""
-    children = (self.data,)
-    aux_data = (self.offset, self.grid, self.width)
-    return children, aux_data
+    # Don't (yet) enforce any explicit consistency requirements between data.ndim
+    # and len(offset), e.g., so we can feel to add extra time/batch/channel
+    # dimensions. But in most cases they should probably match.
+    # Also don't enforce explicit consistency between data.shape and grid.shape,
+    # but similarly they should probably match.
+    data: Array
+    offset: Tuple[float, ...]
+    grid: Grid
+    width: int
 
-  @classmethod
-  def tree_unflatten(cls, aux_data, children):
-    """Returns unflattening recipe for GridArray JAX pytree."""
-    return cls(*children, *aux_data)
+    def __repr__(self):
+        prefix = "    "
+        offsetrepr = textwrap.indent(f"offset: {repr(self.offset)}", prefix=prefix)
+        repr_string = f"GridArray\n{textwrap.indent(repr(self.data),prefix = prefix)}\n{textwrap.indent(repr(self.grid), prefix=prefix)}\n{offsetrepr}"
+        return repr_string
 
-  @property
-  def dtype(self):
-    return self.data.dtype
+    def tree_flatten(self):
+        """Returns flattening recipe for GridArray JAX pytree."""
+        children = (self.data,)
+        aux_data = (self.offset, self.grid, self.width)
+        return children, aux_data
 
-  @property
-  def shape(self) -> Tuple[int, ...]:
-    return self.data.shape
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """Returns unflattening recipe for GridArray JAX pytree."""
+        return cls(*children, *aux_data)
 
+    @property
+    def dtype(self):
+        return self.data.dtype
 
-  _HANDLED_TYPES = (numbers.Number, np.ndarray, jax.Array,
-                    core.ShapedArray, jax.core.Tracer)
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return self.data.shape
 
-  def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-    """Define arithmetic on GridArrays using NumPy's mixin."""
-    for x in inputs:
-      if not isinstance(x, self._HANDLED_TYPES + (GridArray,)):
-        return NotImplemented
-    if method != '__call__':
-      return NotImplemented
-    try:
-      # get the corresponding jax.np function to the NumPy ufunc
-      func = getattr(jnp, ufunc.__name__)
-    except AttributeError:
-      return NotImplemented
-    arrays = [x.data if isinstance(x, GridArray) else x for x in inputs]
-    result = func(*arrays)
-    offset = consistent_offset(*[x for x in inputs if isinstance(x, GridArray)])
-    grid = consistent_grid(*[x for x in inputs if isinstance(x, GridArray)])
-    #grid = inputs.grid#consistent_grid(*[x for x in inputs])
-    if isinstance(result, tuple):
-      return tuple(GridArray(r, offset, grid, self.width) for r in result)
-    else:
-      return GridArray(result, offset, grid, self.width)
+    _HANDLED_TYPES = (
+        numbers.Number,
+        np.ndarray,
+        jax.Array,
+        core.ShapedArray,
+        jax.core.Tracer,
+    )
 
-  def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
-    subgrid = self.grid.subgrid(mesh_index, width=width)
-    return GridArray(self.data, self.offset, subgrid, width=0)
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """Define arithmetic on GridArrays using NumPy's mixin."""
+        for x in inputs:
+            if not isinstance(x, self._HANDLED_TYPES + (GridArray,)):
+                return NotImplemented
+        if method != "__call__":
+            return NotImplemented
+        try:
+            # get the corresponding jax.np function to the NumPy ufunc
+            func = getattr(jnp, ufunc.__name__)
+        except AttributeError:
+            return NotImplemented
+        arrays = [x.data if isinstance(x, GridArray) else x for x in inputs]
+        result = func(*arrays)
+        offset = consistent_offset(*[x for x in inputs if isinstance(x, GridArray)])
+        grid = consistent_grid(*[x for x in inputs if isinstance(x, GridArray)])
+        # grid = inputs.grid#consistent_grid(*[x for x in inputs])
+        if isinstance(result, tuple):
+            return tuple(GridArray(r, offset, grid, self.width) for r in result)
+        else:
+            return GridArray(result, offset, grid, self.width)
 
-  def shard_pad(self, width: int=0):
-    #TODO (mganahl): this design isn't great, we'll need to update this
-    # atm we keep track of the padding width in GridArray (poor design)
-    # shard_pad can't do multiple paddings
-    if width > 0 and self.width == 0:
-      shape = (self.shape[0] + 2*width, self.shape[1] + 2*width)
-      domain = ((self.grid.domain[0][0] - width*self.grid.step[0], self.grid.domain[0][1] + width*self.grid.step[0]),
-                (self.grid.domain[1][0] - width*self.grid.step[1], self.grid.domain[1][1] + width*self.grid.step[1]))
-      grid = Grid(shape=shape, step=self.grid.step,domain=domain, periods=self.grid.periods)
-      return GridArray(pad_shard(self.data, width), self.offset, grid, width)
-    elif width > 0 and self.width > 0:
-      assert width == self.width
-      return GridArray(update_padding_layer(self.data, width), self.offset, self.grid, width)
-    elif width == 0:
-      return GridArray(self.data,self.offset, self.grid, width)
-    else:
-      raise ValueError(f"unsupported value of width = {width}")
+    def to_subgrid(self, mesh_index: tuple[int, int], width: int = 0):
+        subgrid = self.grid.subgrid(mesh_index, width=width)
+        return GridArray(self.data, self.offset, subgrid, width=0)
 
-  def crop(self, width:int=0):
-    if self.width == width:
-      shape = (self.shape[0] - 2*width, self.shape[1] - 2*width)
-      domain = ((self.grid.domain[0][0] - width*self.grid.step[0], self.grid.domain[0][1] + width*self.grid.step[0]),
-                (self.grid.domain[1][0] - width*self.grid.step[1], self.grid.domain[1][1] + width*self.grid.step[1]))
-      grid = Grid(shape=shape, step=self.grid.step, domain=domain, periods=self.grid.periods)
-      return GridArray(self.data[width:-width,width:-width],self.offset, grid, width=0)
-    elif self.width == 0:
-      return GridArray(self.data,self.offset, self.grid, width=0)
-    else:
-      raise ValueError(f"found self.width = {self.width}, which is incompatible with width = {width}")
+    def shard_pad(self, width: int = 0):
+        # TODO (mganahl): this design isn't great, we'll need to update this
+        # atm we keep track of the padding width in GridArray (poor design)
+        # shard_pad can't do multiple paddings
+        if width > 0 and self.width == 0:
+            shape = (self.shape[0] + 2 * width, self.shape[1] + 2 * width)
+            domain = (
+                (
+                    self.grid.domain[0][0] - width * self.grid.step[0],
+                    self.grid.domain[0][1] + width * self.grid.step[0],
+                ),
+                (
+                    self.grid.domain[1][0] - width * self.grid.step[1],
+                    self.grid.domain[1][1] + width * self.grid.step[1],
+                ),
+            )
+            grid = Grid(
+                shape=shape,
+                step=self.grid.step,
+                domain=domain,
+                periods=self.grid.periods,
+            )
+            return GridArray(pad_shard(self.data, width), self.offset, grid, width)
+        elif width > 0 and self.width > 0:
+            assert width == self.width
+            return GridArray(
+                update_padding_layer(self.data, width), self.offset, self.grid, width
+            )
+        elif width == 0:
+            return GridArray(self.data, self.offset, self.grid, width)
+        else:
+            raise ValueError(f"unsupported value of width = {width}")
 
-
+    def crop(self, width: int = 0):
+        if self.width == width:
+            shape = (self.shape[0] - 2 * width, self.shape[1] - 2 * width)
+            domain = (
+                (
+                    self.grid.domain[0][0] - width * self.grid.step[0],
+                    self.grid.domain[0][1] + width * self.grid.step[0],
+                ),
+                (
+                    self.grid.domain[1][0] - width * self.grid.step[1],
+                    self.grid.domain[1][1] + width * self.grid.step[1],
+                ),
+            )
+            grid = Grid(
+                shape=shape,
+                step=self.grid.step,
+                domain=domain,
+                periods=self.grid.periods,
+            )
+            return GridArray(
+                self.data[width:-width, width:-width], self.offset, grid, width=0
+            )
+        elif self.width == 0:
+            return GridArray(self.data, self.offset, self.grid, width=0)
+        else:
+            raise ValueError(
+                f"found self.width = {self.width}, which is incompatible with width = {width}"
+            )
 
 
 GridArrayVector = Tuple[GridArray, ...]
 
 
 class GridArrayTensor(np.ndarray):
-  """A numpy array of GridArrays, representing a physical tensor field.
+    """A numpy array of GridArrays, representing a physical tensor field.
 
-  Packing tensor coordinates into a numpy array of dtype object is useful
-  because pointwise matrix operations like trace, transpose, and matrix
-  multiplications of physical tensor quantities is meaningful.
+    Packing tensor coordinates into a numpy array of dtype object is useful
+    because pointwise matrix operations like trace, transpose, and matrix
+    multiplications of physical tensor quantities is meaningful.
 
-  Example usage:
-    grad = fd.gradient_tensor(uv)                    # a rank 2 Tensor
-    strain_rate = (grad + grad.T) / 2.
-    nu_smag = np.sqrt(np.trace(strain_rate.dot(strain_rate)))
-    nu_smag = Tensor(nu_smag)                        # a rank 0 Tensor
-    subgrid_stress = -2 * nu_smag * strain_rate      # a rank 2 Tensor
-  """
+    Example usage:
+      grad = fd.gradient_tensor(uv)                    # a rank 2 Tensor
+      strain_rate = (grad + grad.T) / 2.
+      nu_smag = np.sqrt(np.trace(strain_rate.dot(strain_rate)))
+      nu_smag = Tensor(nu_smag)                        # a rank 0 Tensor
+      subgrid_stress = -2 * nu_smag * strain_rate      # a rank 2 Tensor
+    """
 
-  def __new__(cls, arrays):
-    return np.asarray(arrays).view(cls)
+    def __new__(cls, arrays):
+        return np.asarray(arrays).view(cls)
 
 
 jax.tree_util.register_pytree_node(
@@ -252,368 +296,390 @@ jax.tree_util.register_pytree_node(
 
 @dataclasses.dataclass(init=False, frozen=False)
 class BoundaryConditions:
-  """Base class for boundary conditions on a PDE variable.
+    """Base class for boundary conditions on a PDE variable.
 
-  Attributes:
-    types: `types[i]` is a tuple specifying the lower and upper BC types for
-      dimension `i`.
-  """
-  types: Tuple[Tuple[str, str], ...]
-
-  def shift(
-      self,
-      u: GridArray,
-      offset: int,
-      axis: int,
-  ) -> GridArray:
-    """Shift an GridArray by `offset`.
-
-    Args:
-      u: an `GridArray` object.
-      offset: positive or negative integer offset to shift.
-      axis: axis to shift along.
-
-    Returns:
-      A copy of `u`, shifted by `offset`. The returned `GridArray` has offset
-      `u.offset + offset`.
+    Attributes:
+      types: `types[i]` is a tuple specifying the lower and upper BC types for
+        dimension `i`.
     """
-    raise NotImplementedError(
-        'shift() not implemented in BoundaryConditions base class.')
 
-  def values(self, axis: int, grid: Grid, offset: Optional[Tuple[float, ...]],
-             time: Optional[float]) -> Tuple[Optional[Array], Optional[Array]]:
-    """Returns Arrays specifying boundary values on the grid along axis.
+    types: Tuple[Tuple[str, str], ...]
 
-    Args:
-      axis: axis along which to return boundary values.
-      grid: a `Grid` object on which to evaluate boundary conditions.
-      offset: a Tuple of offsets that specifies (along with grid) where to
-        evaluate boundary conditions in space.
-      time: a float used as an input to boundary function.
+    def shift(
+        self,
+        u: GridArray,
+        offset: int,
+        axis: int,
+    ) -> GridArray:
+        """Shift an GridArray by `offset`.
 
-    Returns:
-      A tuple of arrays of grid.ndim - 1 dimensions that specify values on the
-      boundary. In case of periodic boundaries, returns a tuple(None,None).
-    """
-    raise NotImplementedError(
-        'values() not implemented in BoundaryConditions base class.')
+        Args:
+          u: an `GridArray` object.
+          offset: positive or negative integer offset to shift.
+          axis: axis to shift along.
 
-  def pad(
-      self,
-      u: GridArray,
-      width: int,
-      axis: int,
-  ) -> GridArray:
-    """Returns Arrays padded according to boundary condition.
+        Returns:
+          A copy of `u`, shifted by `offset`. The returned `GridArray` has offset
+          `u.offset + offset`.
+        """
+        raise NotImplementedError(
+            "shift() not implemented in BoundaryConditions base class."
+        )
 
-    Args:
-      u: a `GridArray` object.
-      width: number of elements to pad along axis. Use negative value for lower
-        boundary or positive value for upper boundary.
-      axis: axis to pad along.
+    def values(
+        self,
+        axis: int,
+        grid: Grid,
+        offset: Optional[Tuple[float, ...]],
+        time: Optional[float],
+    ) -> Tuple[Optional[Array], Optional[Array]]:
+        """Returns Arrays specifying boundary values on the grid along axis.
 
-    Returns:
-      A GridArray that is elongated along axis with padded values.
-    """
-    raise NotImplementedError(
-        'pad() not implemented in BoundaryConditions base class.')
+        Args:
+          axis: axis along which to return boundary values.
+          grid: a `Grid` object on which to evaluate boundary conditions.
+          offset: a Tuple of offsets that specifies (along with grid) where to
+            evaluate boundary conditions in space.
+          time: a float used as an input to boundary function.
 
-  def trim_boundary(self, u: GridArray) -> GridArray:
-    """Returns GridArray without the grid points on the boundary.
+        Returns:
+          A tuple of arrays of grid.ndim - 1 dimensions that specify values on the
+          boundary. In case of periodic boundaries, returns a tuple(None,None).
+        """
+        raise NotImplementedError(
+            "values() not implemented in BoundaryConditions base class."
+        )
 
-    Some grid points of GridArray might coincide with boundary. This trims those
-    values.
+    def pad(
+        self,
+        u: GridArray,
+        width: int,
+        axis: int,
+    ) -> GridArray:
+        """Returns Arrays padded according to boundary condition.
 
-    Args:
-      u: a `GridArray` object.
+        Args:
+          u: a `GridArray` object.
+          width: number of elements to pad along axis. Use negative value for lower
+            boundary or positive value for upper boundary.
+          axis: axis to pad along.
 
-    Returns:
-      A GridArray shrunk along certain dimensions.
-    """
-    raise NotImplementedError(
-        'trim_boundary() not implemented in BoundaryConditions base class.')
+        Returns:
+          A GridArray that is elongated along axis with padded values.
+        """
+        raise NotImplementedError(
+            "pad() not implemented in BoundaryConditions base class."
+        )
 
-  def pad_and_impose_bc(
-      self,
-      u: GridArray,
-      offset_to_pad_to: Optional[Tuple[float, ...]] = None) -> GridVariable:
-    """Returns GridVariable with correct boundary condition.
+    def trim_boundary(self, u: GridArray) -> GridArray:
+        """Returns GridArray without the grid points on the boundary.
 
-    Some grid points of GridArray might coincide with boundary. This ensures
-    that the GridVariable.array agrees with GridVariable.bc.
-    Args:
-      u: a `GridArray` object that specifies only scalar values on the internal
-        nodes.
-      offset_to_pad_to: a Tuple of desired offset to pad to. Note that if the
-        function is given just an interior array in dirichlet case, it can pad
-        to both 0 offset and 1 offset.
+        Some grid points of GridArray might coincide with boundary. This trims those
+        values.
 
-    Returns:
-      A GridVariable that has correct boundary.
-    """
-    raise NotImplementedError(
-        'pad_and_impose_bc() not implemented in BoundaryConditions base class.')
+        Args:
+          u: a `GridArray` object.
 
-  def impose_bc(self, u: GridArray) -> GridVariable:
-    """Returns GridVariable with correct boundary condition.
+        Returns:
+          A GridArray shrunk along certain dimensions.
+        """
+        raise NotImplementedError(
+            "trim_boundary() not implemented in BoundaryConditions base class."
+        )
 
-    Some grid points of GridArray might coincide with boundary. This ensures
-    that the GridVariable.array agrees with GridVariable.bc.
-    Args:
-      u: a `GridArray` object.
+    def pad_and_impose_bc(
+        self, u: GridArray, offset_to_pad_to: Optional[Tuple[float, ...]] = None
+    ) -> GridVariable:
+        """Returns GridVariable with correct boundary condition.
 
-    Returns:
-      A GridVariable that has correct boundary.
-    """
-    raise NotImplementedError(
-        'impose_bc() not implemented in BoundaryConditions base class.')
+        Some grid points of GridArray might coincide with boundary. This ensures
+        that the GridVariable.array agrees with GridVariable.bc.
+        Args:
+          u: a `GridArray` object that specifies only scalar values on the internal
+            nodes.
+          offset_to_pad_to: a Tuple of desired offset to pad to. Note that if the
+            function is given just an interior array in dirichlet case, it can pad
+            to both 0 offset and 1 offset.
+
+        Returns:
+          A GridVariable that has correct boundary.
+        """
+        raise NotImplementedError(
+            "pad_and_impose_bc() not implemented in BoundaryConditions base class."
+        )
+
+    def impose_bc(self, u: GridArray) -> GridVariable:
+        """Returns GridVariable with correct boundary condition.
+
+        Some grid points of GridArray might coincide with boundary. This ensures
+        that the GridVariable.array agrees with GridVariable.bc.
+        Args:
+          u: a `GridArray` object.
+
+        Returns:
+          A GridVariable that has correct boundary.
+        """
+        raise NotImplementedError(
+            "impose_bc() not implemented in BoundaryConditions base class."
+        )
 
 
-@jax.tree_util.Partial(register_dataclass, data_fields =['array'], meta_fields=['bc'])
+@jax.tree_util.Partial(register_dataclass, data_fields=["array"], meta_fields=["bc"])
 @dataclasses.dataclass
 class GridVariable:
-  """Associates a GridArray with BoundaryConditions.
+    """Associates a GridArray with BoundaryConditions.
 
-  Performing pad and shift operations, e.g. for finite difference calculations,
-  requires boundary condition (BC) information. Since different variables in a
-  PDE system can have different BCs, this class associates a specific variable's
-  data with its BCs.
+    Performing pad and shift operations, e.g. for finite difference calculations,
+    requires boundary condition (BC) information. Since different variables in a
+    PDE system can have different BCs, this class associates a specific variable's
+    data with its BCs.
 
-  Array operations on GridVariables act like array operations on the
-  encapsulated GridArray.
+    Array operations on GridVariables act like array operations on the
+    encapsulated GridArray.
 
-  Attributes:
-    array: GridArray with the array data, offset, and associated grid.
-    bc: boundary conditions for this variable.
-    grid: the Grid associated with the array data.
-    dtype: type of the array data.
-    shape: lengths of the array dimensions.
-    data: array values.
-    offset: alignment location of the data with respect to the grid.
-    grid: the Grid associated with the array data.
-  """
-  array: GridArray
-  bc: BoundaryConditions
-  def __post_init__(self):
-    if not isinstance(self.array, GridArray):  # frequently missed by pytype
-      raise ValueError(
-          f'Expected array type to be GridArray, got {type(self.array)}')
-    if len(self.bc.types) != self.grid.ndim:
-      raise ValueError(
-          'Incompatible dimension between grid and bc, grid dimension = '
-          f'{self.grid.ndim}, bc dimension = {len(self.bc.types)}')
-
-  def tree_flatten(self):
-    """Returns flattening recipe for GridVariable JAX pytree."""
-    children = (self.array,self.bc)
-    aux_data = None
-    return children, aux_data
-
-  @classmethod
-  def tree_unflatten(cls, aux_data, children):
-    """Returns unflattening recipe for GridVariable JAX pytree."""
-    return cls(*children)
-
-  @property
-  def dtype(self):
-    return self.array.dtype
-
-  @property
-  def shape(self) -> Tuple[int, ...]:
-    return self.array.shape
-
-  @property
-  def data(self) -> Array:
-    return self.array.data
-
-  @data.setter
-  def data(self) -> Array:
-    self.array.data = data
-
-  @property
-  def offset(self) -> Tuple[float, ...]:
-    return self.array.offset
-
-  @property
-  def grid(self) -> Grid:
-    return self.array.grid
-
-  @property
-  def width(self) -> int:
-    return self.array.width
-  
-  def shift(
-      self,
-      offset: int,
-      axis: int,
-  ) -> GridArray:
-    """Shift this GridVariable by `offset`.
-
-    Args:
-      offset: positive or negative integer offset to shift.
-      axis: axis to shift along.
-
-    Returns:
-      A copy of the encapsulated GridArray, shifted by `offset`. The returned
-      GridArray has offset `u.offset + offset`.
+    Attributes:
+      array: GridArray with the array data, offset, and associated grid.
+      bc: boundary conditions for this variable.
+      grid: the Grid associated with the array data.
+      dtype: type of the array data.
+      shape: lengths of the array dimensions.
+      data: array values.
+      offset: alignment location of the data with respect to the grid.
+      grid: the Grid associated with the array data.
     """
-    return self.bc.shift(self.array, offset, axis)
 
-  def _interior_grid(self) -> Grid:
-    """Returns only the interior grid points."""
-    grid = self.array.grid
-    domain = list(grid.domain)
-    shape = list(grid.shape)
-    for axis in range(self.grid.ndim):
-      # nothing happens in periodic case
-      if self.bc.types[axis][1] == 'periodic':
-        continue
-      # nothing happens if the offset is not 0.0 or 1.0
-      # this will automatically set the grid to interior.
-      if np.isclose(self.array.offset[axis], 1.0):
-        shape[axis] -= 1
-        domain[axis] = (domain[axis][0], domain[axis][1] - grid.step[axis])
-      elif np.isclose(self.array.offset[axis], 0.0):
-        shape[axis] -= 1
-        domain[axis] = (domain[axis][0] + grid.step[axis], domain[axis][1])
-    return Grid(shape, domain=tuple(domain))
+    array: GridArray
+    bc: BoundaryConditions
 
-  def trim_boundary(self) -> GridArray:
-    """Returns a GridArray associated only with interior points.
+    def __post_init__(self):
+        if not isinstance(self.array, GridArray):  # frequently missed by pytype
+            raise ValueError(
+                f"Expected array type to be GridArray, got {type(self.array)}"
+            )
+        if len(self.bc.types) != self.grid.ndim:
+            raise ValueError(
+                "Incompatible dimension between grid and bc, grid dimension = "
+                f"{self.grid.ndim}, bc dimension = {len(self.bc.types)}"
+            )
 
-     Interior is defined as the following:
-       for d in range(u.grid.ndim):
-        points = u.grid.axes(offset=u.offset[d])
-        interior_points =
-          all points where grid.domain[d][0] < points < grid.domain[d][1]
+    def tree_flatten(self):
+        """Returns flattening recipe for GridVariable JAX pytree."""
+        children = (self.array, self.bc)
+        aux_data = None
+        return children, aux_data
 
-    The exception is when the boundary conditions are periodic,
-    in which case all points are included in the interior.
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """Returns unflattening recipe for GridVariable JAX pytree."""
+        return cls(*children)
 
-    In case of dirichlet with edge offset, the grid and array size is reduced,
-    since one scalar lies exactly on the boundary. In all other cases,
-    self.grid and self.array are returned.
-    """
-    return self.bc.trim_boundary(self.array)
+    @property
+    def dtype(self):
+        return self.array.dtype
 
-  def to_subgrid(self, mesh_index: tuple[int,int], width: int = 0):
-    return GridVariable(self.array.to_subgrid(mesh_index, width), self.bc)
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return self.array.shape
 
-  def shard_pad(self, width:int=0):
-    return GridVariable(self.array.shard_pad(width), self.bc)
+    @property
+    def data(self) -> Array:
+        return self.array.data
 
-  def crop(self, width:int=0):
-    return GridVariable(self.array.crop(width), self.bc)
+    @data.setter
+    def data(self) -> Array:
+        self.array.data = data
 
-  def impose_bc(self) -> GridVariable:
-    """Returns the GridVariable with edge BC enforced, if applicable.
+    @property
+    def offset(self) -> Tuple[float, ...]:
+        return self.array.offset
 
-    For GridVariables having nonperiodic BC and offset 0 or 1, there are values
-    in the array data that are dependent on the boundary condition.
-    impose_bc() changes these boundary values to match the prescribed BC.
-    """
-    return self.bc.impose_bc(self.array)
+    @property
+    def grid(self) -> Grid:
+        return self.array.grid
 
-  def __repr__(self):
-    prefix = '    '
-    bcstring = f"Boundary Condition: {repr(self.bc)}\n"
-    outstring = f"\nGridVariable\n {textwrap.indent(repr(self.array), prefix)}\n{textwrap.indent(bcstring, prefix)}"
-    return outstring
+    @property
+    def width(self) -> int:
+        return self.array.width
+
+    def shift(
+        self,
+        offset: int,
+        axis: int,
+    ) -> GridArray:
+        """Shift this GridVariable by `offset`.
+
+        Args:
+          offset: positive or negative integer offset to shift.
+          axis: axis to shift along.
+
+        Returns:
+          A copy of the encapsulated GridArray, shifted by `offset`. The returned
+          GridArray has offset `u.offset + offset`.
+        """
+        return self.bc.shift(self.array, offset, axis)
+
+    def _interior_grid(self) -> Grid:
+        """Returns only the interior grid points."""
+        grid = self.array.grid
+        domain = list(grid.domain)
+        shape = list(grid.shape)
+        for axis in range(self.grid.ndim):
+            # nothing happens in periodic case
+            if self.bc.types[axis][1] == "periodic":
+                continue
+            # nothing happens if the offset is not 0.0 or 1.0
+            # this will automatically set the grid to interior.
+            if np.isclose(self.array.offset[axis], 1.0):
+                shape[axis] -= 1
+                domain[axis] = (domain[axis][0], domain[axis][1] - grid.step[axis])
+            elif np.isclose(self.array.offset[axis], 0.0):
+                shape[axis] -= 1
+                domain[axis] = (domain[axis][0] + grid.step[axis], domain[axis][1])
+        return Grid(shape, domain=tuple(domain))
+
+    def trim_boundary(self) -> GridArray:
+        """Returns a GridArray associated only with interior points.
+
+         Interior is defined as the following:
+           for d in range(u.grid.ndim):
+            points = u.grid.axes(offset=u.offset[d])
+            interior_points =
+              all points where grid.domain[d][0] < points < grid.domain[d][1]
+
+        The exception is when the boundary conditions are periodic,
+        in which case all points are included in the interior.
+
+        In case of dirichlet with edge offset, the grid and array size is reduced,
+        since one scalar lies exactly on the boundary. In all other cases,
+        self.grid and self.array are returned.
+        """
+        return self.bc.trim_boundary(self.array)
+
+    def to_subgrid(self, mesh_index: tuple[int, int], width: int = 0):
+        return GridVariable(self.array.to_subgrid(mesh_index, width), self.bc)
+
+    def shard_pad(self, width: int = 0):
+        return GridVariable(self.array.shard_pad(width), self.bc)
+
+    def crop(self, width: int = 0):
+        return GridVariable(self.array.crop(width), self.bc)
+
+    def impose_bc(self) -> GridVariable:
+        """Returns the GridVariable with edge BC enforced, if applicable.
+
+        For GridVariables having nonperiodic BC and offset 0 or 1, there are values
+        in the array data that are dependent on the boundary condition.
+        impose_bc() changes these boundary values to match the prescribed BC.
+        """
+        return self.bc.impose_bc(self.array)
+
+    def __repr__(self):
+        prefix = "    "
+        bcstring = f"Boundary Condition: {repr(self.bc)}\n"
+        outstring = f"\nGridVariable\n {textwrap.indent(repr(self.array), prefix)}\n{textwrap.indent(bcstring, prefix)}"
+        return outstring
+
 
 GridVariableVector = Tuple[GridVariable, ...]
 
 
 def applied(func):
-  """Convert an array function into one defined on GridArrays.
+    """Convert an array function into one defined on GridArrays.
 
-  Since `func` can only act on `data` attribute of GridArray, it implicitly
-  enforces that `func` cannot modify the other attributes such as offset.
+    Since `func` can only act on `data` attribute of GridArray, it implicitly
+    enforces that `func` cannot modify the other attributes such as offset.
 
-  Args:
-    func: function being wrapped.
+    Args:
+      func: function being wrapped.
 
-  Returns:
-    A wrapped version of `func` that takes GridArray instead of Array args.
-  """
+    Returns:
+      A wrapped version of `func` that takes GridArray instead of Array args.
+    """
 
-  def wrapper(*args, **kwargs):  # pylint: disable=missing-docstring
-    for arg in args + tuple(kwargs.values()):
-      if isinstance(arg, GridVariable):
-        raise ValueError('grids.applied() cannot be used with GridVariable')
+    def wrapper(*args, **kwargs):  # pylint: disable=missing-docstring
+        for arg in args + tuple(kwargs.values()):
+            if isinstance(arg, GridVariable):
+                raise ValueError("grids.applied() cannot be used with GridVariable")
 
-    offset = consistent_offset(*[
-        arg for arg in args + tuple(kwargs.values())
-        if isinstance(arg, GridArray)
-    ])
-    grid = consistent_grid(*[
-        arg for arg in args + tuple(kwargs.values())
-        if isinstance(arg, GridArray)
-    ])
-    raw_args = [arg.data if isinstance(arg, GridArray) else arg for arg in args]
-    raw_kwargs = {
-        k: v.data if isinstance(v, GridArray) else v for k, v in kwargs.items()
-    }
-    data = func(*raw_args, **raw_kwargs)
-    return GridArray(data, offset, grid,args[0].width)
+        offset = consistent_offset(
+            *[
+                arg
+                for arg in args + tuple(kwargs.values())
+                if isinstance(arg, GridArray)
+            ]
+        )
+        grid = consistent_grid(
+            *[
+                arg
+                for arg in args + tuple(kwargs.values())
+                if isinstance(arg, GridArray)
+            ]
+        )
+        raw_args = [arg.data if isinstance(arg, GridArray) else arg for arg in args]
+        raw_kwargs = {
+            k: v.data if isinstance(v, GridArray) else v for k, v in kwargs.items()
+        }
+        data = func(*raw_args, **raw_kwargs)
+        return GridArray(data, offset, grid, args[0].width)
 
-  return wrapper
+    return wrapper
 
 
 # Aliases for often used `grids.applied` functions.
 where = applied(jnp.where)
 
 
-def averaged_offset(
-    *arrays: Union[GridArray, GridVariable]) -> Tuple[float, ...]:
-  """Returns the averaged offset of the given arrays."""
-  offset = np.mean([array.offset for array in arrays], axis=0)
-  return tuple(offset.tolist())
+def averaged_offset(*arrays: Union[GridArray, GridVariable]) -> Tuple[float, ...]:
+    """Returns the averaged offset of the given arrays."""
+    offset = np.mean([array.offset for array in arrays], axis=0)
+    return tuple(offset.tolist())
 
 
 def control_volume_offsets(
-    c: Union[GridArray, GridVariable]) -> Tuple[Tuple[float, ...], ...]:
-  """Returns offsets for the faces of the control volume centered at `c`."""
-  return tuple(
-      tuple(o + .5 if i == j else o
-            for i, o in enumerate(c.offset))
-      for j in range(len(c.offset)))
+    c: Union[GridArray, GridVariable],
+) -> Tuple[Tuple[float, ...], ...]:
+    """Returns offsets for the faces of the control volume centered at `c`."""
+    return tuple(
+        tuple(o + 0.5 if i == j else o for i, o in enumerate(c.offset))
+        for j in range(len(c.offset))
+    )
 
 
 class InconsistentOffsetError(Exception):
-  """Raised for cases of inconsistent offset in GridArrays."""
+    """Raised for cases of inconsistent offset in GridArrays."""
 
 
-def consistent_offset(
-    *arrays: Union[GridArray, GridVariable]) -> Tuple[float, ...]:
-  """Returns the unique offset, or raises InconsistentOffsetError."""
-  offsets = {array.offset for array in arrays}
-  if len(offsets) != 1:
-    raise InconsistentOffsetError(
-        f'arrays do not have a unique offset: {offsets}')
-  offset, = offsets
-  return offset
+def consistent_offset(*arrays: Union[GridArray, GridVariable]) -> Tuple[float, ...]:
+    """Returns the unique offset, or raises InconsistentOffsetError."""
+    offsets = {array.offset for array in arrays}
+    if len(offsets) != 1:
+        raise InconsistentOffsetError(f"arrays do not have a unique offset: {offsets}")
+    (offset,) = offsets
+    return offset
 
 
 class InconsistentGridError(Exception):
-  """Raised for cases of inconsistent grids between GridArrays."""
+    """Raised for cases of inconsistent grids between GridArrays."""
 
 
 def consistent_grid(*arrays: Union[GridArray, GridVariable]) -> Grid:
-  """Returns the unique grid, or raises InconsistentGridError."""
-  # mganahl: this check can't be traced at the moment
-  # shapes_same = len({array.grid.shape for array in arrays}) == 1
-  # steps_array = jnp.stack([jnp.array(array.grid.step) for array in arrays], axis=1)
-  # steps_close = jax.numpy.all(jax.vmap(jax.numpy.allclose, in_axes = 1, out_axes = 0)(steps_array,steps_array))
+    """Returns the unique grid, or raises InconsistentGridError."""
+    # mganahl: this check can't be traced at the moment
+    # shapes_same = len({array.grid.shape for array in arrays}) == 1
+    # steps_array = jnp.stack([jnp.array(array.grid.step) for array in arrays], axis=1)
+    # steps_close = jax.numpy.all(jax.vmap(jax.numpy.allclose, in_axes = 1, out_axes = 0)(steps_array,steps_array))
 
-  # domains_array = jnp.stack([jnp.array(array.grid.domain) for array in arrays], axis=1)
-  # domains_close = jax.numpy.all(jax.vmap(jax.numpy.allclose, in_axes = 1, out_axes = 0)(domains_array,domains_array))
+    # domains_array = jnp.stack([jnp.array(array.grid.domain) for array in arrays], axis=1)
+    # domains_close = jax.numpy.all(jax.vmap(jax.numpy.allclose, in_axes = 1, out_axes = 0)(domains_array,domains_array))
 
-  # periods_close = len({array.grid.periods for array in arrays}) == 1
-  # if steps_close and domains_close and periods_close and shapes_same:
-  #   return arrays[0].grid
-  # raise InconsistentGridError(f'arrays do not have a unique grid: {grids}')
-  
-  return arrays[0].grid
+    # periods_close = len({array.grid.periods for array in arrays}) == 1
+    # if steps_close and domains_close and periods_close and shapes_same:
+    #   return arrays[0].grid
+    # raise InconsistentGridError(f'arrays do not have a unique grid: {grids}')
+
+    return arrays[0].grid
+
+
 # def consistent_grid(*arrays: Union[GridArray, GridVariable]) -> Grid:
 #   """Returns the unique grid, or raises InconsistentGridError."""
 #   grids = {array.grid for array in arrays}
@@ -624,336 +690,406 @@ def consistent_grid(*arrays: Union[GridArray, GridVariable]) -> Grid:
 
 
 class InconsistentBoundaryConditionsError(Exception):
-  """Raised for cases of inconsistent bc between GridVariables."""
+    """Raised for cases of inconsistent bc between GridVariables."""
 
 
 def consistent_boundary_conditions(*arrays: GridVariable) -> BoundaryConditions:
-  """Returns the unique BCs, or raises InconsistentBoundaryConditionsError."""
-  bcs = {array.bc for array in arrays}
-  if len(bcs) != 1:
-    raise InconsistentBoundaryConditionsError(
-        f'arrays do not have a unique bc: {bcs}')
-  bc, = bcs
-  return bc
+    """Returns the unique BCs, or raises InconsistentBoundaryConditionsError."""
+    bcs = {array.bc for array in arrays}
+    if len(bcs) != 1:
+        raise InconsistentBoundaryConditionsError(
+            f"arrays do not have a unique bc: {bcs}"
+        )
+    (bc,) = bcs
+    return bc
 
 
 @dataclasses.dataclass(init=False, frozen=True)
 class Grid:
-  """Describes the size and shape for an Arakawa C-Grid.
+    """Describes the size and shape for an Arakawa C-Grid.
 
-  See https://en.wikipedia.org/wiki/Arakawa_grids.
+    See https://en.wikipedia.org/wiki/Arakawa_grids.
 
-  This class describes domains that can be written as an outer-product of 1D
-  grids. Along each dimension `i`:
-  - `shape[i]` gives the whole number of grid cells on a single device.
-  - `step[i]` is the width of each grid cell.
-  - `(lower, upper) = domain[i]` gives the locations of lower and upper
-    boundaries. The identity `upper - lower = step[i] * shape[i]` is enforced.
+    This class describes domains that can be written as an outer-product of 1D
+    grids. Along each dimension `i`:
+    - `shape[i]` gives the whole number of grid cells on a single device.
+    - `step[i]` is the width of each grid cell.
+    - `(lower, upper) = domain[i]` gives the locations of lower and upper
+      boundaries. The identity `upper - lower = step[i] * shape[i]` is enforced.
 
-  Args:
-    shape: the shape of the grid in each dimension
-    step: the step size of the discretization in each dimension
-    domain: the domain boundaries in each dimension
-    periods: Periodicity of the grid. If (None,None) (default)its not periodic.
-    device_mesh: The mesh of the device grid
-  """
-  shape: Tuple[int, ...]
-  step: Tuple[float, ...]
-  domain: Tuple[Tuple[float, float], ...]
-  periods: tuple[float, float] = None
-  device_mesh: jax._src.mesh.Mesh = None
-  dtype = jnp.float64
-  def __init__(
-      self,
-      shape: Sequence[int],
-      step: Optional[Union[float, Sequence[float]]] = None,
-      domain: Optional[Union[float, Sequence[Tuple[float, float]]]] = None,
-      periods: Optional[tuple[float, float]] = None,
-      device_mesh:Optional[jax._src.mesh.Mesh] = None,
-      dtype = jnp.float64
-  ):
-    """Construct a grid object."""
-    shape = tuple(operator.index(s) for s in shape)
-    object.__setattr__(self, 'shape', shape)
+    Args:
+      shape: the shape of the grid in each dimension
+      step: the step size of the discretization in each dimension
+      domain: the domain boundaries in each dimension
+      periods: Periodicity of the grid. If (None,None) (default)its not periodic.
+      device_mesh: The mesh of the device grid
+    """
 
-    object.__setattr__(self, 'periods', periods)
+    shape: Tuple[int, ...]
+    step: Tuple[float, ...]
+    domain: Tuple[Tuple[float, float], ...]
+    periods: tuple[float, float] = None
+    device_mesh: jax._src.mesh.Mesh = None
+    dtype = jnp.float64
 
-    if step is not None and domain is not None:
+    def __init__(
+        self,
+        shape: Sequence[int],
+        step: Optional[Union[float, Sequence[float]]] = None,
+        domain: Optional[Union[float, Sequence[Tuple[float, float]]]] = None,
+        periods: Optional[tuple[float, float]] = None,
+        device_mesh: Optional[jax._src.mesh.Mesh] = None,
+        dtype=jnp.float64,
+    ):
+        """Construct a grid object."""
+        shape = tuple(operator.index(s) for s in shape)
+        object.__setattr__(self, "shape", shape)
 
-      if isinstance(step, numbers.Number):
-        step = (step,) * self.ndim
-      elif len(step) != self.ndim:
-        raise ValueError('length of step does not match ndim: '
-                         f'{len(step)} != {self.ndim}')
+        object.__setattr__(self, "periods", periods)
 
-      if isinstance(domain, (int, float)):
-        domain = ((0, domain),) * len(shape)
-      else:
-        if len(domain) != self.ndim:
-          raise ValueError('length of domain does not match ndim: '
-                           f'{len(domain)} != {self.ndim}')
-        for bounds in domain:
-          if len(bounds) != 2:
+        if step is not None and domain is not None:
+
+            if isinstance(step, numbers.Number):
+                step = (step,) * self.ndim
+            elif len(step) != self.ndim:
+                raise ValueError(
+                    "length of step does not match ndim: " f"{len(step)} != {self.ndim}"
+                )
+
+            if isinstance(domain, (int, float)):
+                domain = ((0, domain),) * len(shape)
+            else:
+                if len(domain) != self.ndim:
+                    raise ValueError(
+                        "length of domain does not match ndim: "
+                        f"{len(domain)} != {self.ndim}"
+                    )
+                for bounds in domain:
+                    if len(bounds) != 2:
+                        raise ValueError(
+                            f"domain is not sequence of pairs of numbers: {domain}"
+                        )
+            domain = tuple(
+                (jnp.astype(lower, dtype), jnp.astype(upper, dtype))
+                for lower, upper in domain
+            )
+
+        elif domain is not None and step is None:
+            if isinstance(domain, (int, float)):
+                domain = ((0, domain),) * len(shape)
+            else:
+                if len(domain) != self.ndim:
+                    raise ValueError(
+                        "length of domain does not match ndim: "
+                        f"{len(domain)} != {self.ndim}"
+                    )
+                for bounds in domain:
+                    if len(bounds) != 2:
+                        raise ValueError(
+                            f"domain is not sequence of pairs of numbers: {domain}"
+                        )
+            domain = tuple(
+                (jnp.astype(lower, dtype), jnp.astype(upper, dtype))
+                for lower, upper in domain
+            )
+            step = tuple(
+                (upper - lower) / size for (lower, upper), size in zip(domain, shape)
+            )
+
+        elif domain is None and step is not None:
+            if isinstance(step, numbers.Number):
+                step = (step,) * self.ndim
+            elif len(step) != self.ndim:
+                raise ValueError(
+                    "length of step does not match ndim: " f"{len(step)} != {self.ndim}"
+                )
+            domain = tuple(
+                (0.0, float(step_ * size)) for step_, size in zip(step, shape)
+            )
+        else:
+            raise TypeError("Need to provide at least step or domain")
+
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "step", step)
+
+        if device_mesh is not None:
+            mesh_shape = device_mesh.axis_sizes
+            for s1, s2 in zip(self.shape, mesh_shape):
+                if divmod(s1, s2)[1] != 0:
+                    raise ValueError(
+                        f"grid shape {self.shape} is not integer divisible"
+                        f"by a device-mesh shape {mesh_shape}"
+                    )
+            object.__setattr__(self, "device_mesh", device_mesh)
+        object.__setattr__(self, "dtype", dtype)
+
+    @property
+    def ndim(self) -> int:
+        """Returns the number of dimensions of this grid."""
+        return len(self.shape)
+
+    @property
+    def cell_center(self) -> Tuple[float, ...]:
+        """Offset at the center of each grid cell."""
+        return self.ndim * (0.5,)
+
+    @property
+    def cell_faces(self) -> Tuple[Tuple[float, ...]]:
+        """Returns the offsets at each of the 'forward' cell faces."""
+        d = self.ndim
+        offsets = (np.eye(d) + np.ones([d, d])) / 2.0
+        return tuple(tuple(float(o) for o in offset) for offset in offsets)
+
+    def stagger(self, v: Tuple[Array, ...]) -> Tuple[GridArray, ...]:
+        """Places the velocity components of `v` on the `Grid`'s cell faces."""
+        offsets = self.cell_faces
+        return tuple(GridArray(u, o, self, 0) for u, o in zip(v, offsets))
+
+    def center(self, v: PyTree) -> PyTree:
+        """Places all arrays in the pytree `v` at the `Grid`'s cell center."""
+        offset = self.cell_center
+        return jax.tree_map(lambda u: GridArray(u, offset, self), v)
+
+    def axes(self, offset: Optional[Sequence[float]] = None) -> Tuple[Array, ...]:
+        """Returns a tuple of arrays containing the grid points along each axis.
+
+        Args:
+          offset: an optional sequence of length `ndim`. The grid will be shifted by
+            `offset * self.step`.
+
+        Returns:
+          An tuple of `self.ndim` arrays. The jth return value has shape
+          `[self.shape[j]]`.
+        """
+        if offset is None:
+            offset = self.cell_center
+        if len(offset) != self.ndim:
             raise ValueError(
-                f'domain is not sequence of pairs of numbers: {domain}')
-      domain = tuple((jnp.astype(lower, dtype), jnp.astype(upper, dtype)) for lower, upper in domain)
+                f"unexpected offset length: {len(offset)} vs " f"{self.ndim}"
+            )
+        axes = []
+        for n, ((lower, _), offset_i, length, step) in enumerate(
+            zip(self.domain, offset, self.shape, self.step)
+        ):
+            if self.periods:
+                axes.append(
+                    (lower + (jnp.arange(length) + offset_i) * step) % self.periods[n]
+                )
+            else:
+                axes.append(lower + (jnp.arange(length) + offset_i) * step)
+        return tuple(axes)
 
-    elif domain is not None and step is None:
-      if isinstance(domain, (int, float)):
-        domain = ((0, domain),) * len(shape)
-      else:
-        if len(domain) != self.ndim:
-          raise ValueError('length of domain does not match ndim: '
-                           f'{len(domain)} != {self.ndim}')
-        for bounds in domain:
-          if len(bounds) != 2:
-            raise ValueError(
-                f'domain is not sequence of pairs of numbers: {domain}')
-      domain = tuple((jnp.astype(lower, dtype), jnp.astype(upper, dtype)) for lower, upper in domain)
-      step = tuple(
-        (upper - lower) / size for (lower, upper), size in zip(domain, shape))
+    def fft_axes(self) -> Tuple[Array, ...]:
+        """Returns the ordinal frequencies corresponding to the axes.
 
-    elif domain is None and step is not None:
-      if isinstance(step, numbers.Number):
-        step = (step,) * self.ndim
-      elif len(step) != self.ndim:
-        raise ValueError('length of step does not match ndim: '
-                         f'{len(step)} != {self.ndim}')
-      domain = tuple(
-          (0.0, float(step_ * size)) for step_, size in zip(step, shape))
-    else:
-      raise TypeError('Need to provide at least step or domain')
+        Transforms each axis into the *ordinal* frequencies for the Fast Fourier
+        Transform (FFT). Multiply by `2 * jnp.pi` to get angular frequencies.
 
-    object.__setattr__(self, 'domain', domain)
-    object.__setattr__(self, 'step', step)
+        Returns:
+          A tuple of `self.ndim` arrays. The jth return value has shape
+          `[self.shape[j]]`.
+        """
+        freq_axes = tuple(
+            jnp.fft.fftfreq(n, d=s) for (n, s) in zip(self.shape, self.step)
+        )
+        return freq_axes
 
-    if device_mesh is not None:
-      mesh_shape = device_mesh.axis_sizes
-      for s1, s2 in zip(self.shape, mesh_shape):
-        if divmod(s1, s2)[1] != 0:
-          raise ValueError(f"grid shape {self.shape} is not integer divisible"
-                           f"by a device-mesh shape {mesh_shape}")
-      object.__setattr__(self, 'device_mesh', device_mesh)
-    object.__setattr__(self, 'dtype', dtype)
+    def rfft_axes(self) -> Tuple[Array, ...]:
+        """Returns the ordinal frequencies corresponding to the axes.
+
+        Transforms each axis into the *ordinal* frequencies for the Fast Fourier
+        Transform (FFT). Most useful for doing computations for real-valued (not
+        complex valued) signals.
+
+        Multiply by `2 * jnp.pi` to get angular frequencies.
+
+        Returns:
+          A tuple of `self.ndim` arrays. The shape of each array matches the result
+          of rfftfreqs. Specifically, rfft is applied to the last dimension
+          resulting in an array of length `self.shape[-1] // 2`. Complex `fft` is
+          applied to the other dimensions resulting in shapes of size
+          `self.shape[j]`.
+        """
+        fft_axes = tuple(
+            jnp.fft.fftfreq(n, d=s) for (n, s) in zip(self.shape[:-1], self.step[:-1])
+        )
+        rfft_axis = (jnp.fft.rfftfreq(self.shape[-1], d=self.step[-1]),)
+        return fft_axes + rfft_axis
+
+    def mesh(self, offset: Optional[Sequence[float]] = None) -> Tuple[Array, ...]:
+        """Returns an tuple of arrays containing positions in each grid cell.
+
+        Args:
+          offset: an optional sequence of length `ndim`. The grid will be shifted by
+            `offset * self.step`.
+
+        Returns:
+          An tuple of `self.ndim` arrays, each of shape `self.shape`. In 3
+          dimensions, entry `self.mesh[n][i, j, k]` is the location of point
+          `i, j, k` in dimension `n`.
+        """
+        axes = self.axes(offset)
+        return tuple(jnp.meshgrid(*axes, indexing="ij"))
+
+    def rfft_mesh(self) -> Tuple[Array, ...]:
+        """Returns a tuple of arrays containing positions in rfft space."""
+        rfft_axes = self.rfft_axes()
+        return tuple(jnp.meshgrid(*rfft_axes, indexing="ij"))
+
+    def eval_on_mesh(
+        self, fn: Callable[..., Array], offset: Optional[Sequence[float]] = None
+    ) -> GridArray:
+        """Evaluates the function on the grid mesh with the specified offset.
+
+        Args:
+          fn: A function that accepts the mesh arrays and returns an array.
+          offset: an optional sequence of length `ndim`.  If not specified, uses the
+            offset for the cell center.
+
+        Returns:
+          fn(x, y, ...) evaluated on the mesh, as a GridArray with specified offset.
+        """
+        if offset is None:
+            offset = self.cell_center
+        return GridArray(fn(*self.mesh(offset)), offset, self, 0)
+
+    def subgrid(self, index: tuple[int, int], width: int = 0):
+        """
+        Create a subgrid of `Grid` for the index `index` on a device-mesh given by Grid.device_mesh.
+        Grid shape has to be divisble by Grid.device_mesh.axis_sizes.
+
+        """
+
+        mesh_shape = self.device_mesh.axis_sizes
+        # for i, s in zip(index, mesh_shape):
+        #   if i >= s:
+        #     raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
+        sub_domain = []
+        subdomain_shape = []
+        for n in range(self.ndim):
+            s = mesh_shape[n]
+            stride = self.shape[n] // s
+            subdomain_shape.append(stride + 2 * width)
+            sub_domain.append(
+                (
+                    self.domain[n][0]
+                    - width * self.step[n]
+                    + self.step[n] * (stride * index[n]),
+                    self.domain[n][0]
+                    + width * self.step[n]
+                    + self.step[n] * (stride * (index[n] + 1)),
+                )
+            )
+            subgrid = Grid(
+                shape=subdomain_shape, domain=sub_domain, periods=self.periods
+            )
+        return subgrid
 
 
-  @property
-  def ndim(self) -> int:
-    """Returns the number of dimensions of this grid."""
-    return len(self.shape)
-
-  @property
-  def cell_center(self) -> Tuple[float, ...]:
-    """Offset at the center of each grid cell."""
-    return self.ndim * (0.5,)
-
-  @property
-  def cell_faces(self) -> Tuple[Tuple[float, ...]]:
-    """Returns the offsets at each of the 'forward' cell faces."""
-    d = self.ndim
-    offsets = (np.eye(d) + np.ones([d, d])) / 2.
-    return tuple(tuple(float(o) for o in offset) for offset in offsets)
-
-  def stagger(self, v: Tuple[Array, ...]) -> Tuple[GridArray, ...]:
-    """Places the velocity components of `v` on the `Grid`'s cell faces."""
-    offsets = self.cell_faces
-    return tuple(GridArray(u, o, self, 0) for u, o in zip(v, offsets))
-
-  def center(self, v: PyTree) -> PyTree:
-    """Places all arrays in the pytree `v` at the `Grid`'s cell center."""
-    offset = self.cell_center
-    return jax.tree_map(lambda u: GridArray(u, offset, self), v)
-
-  def axes(self, offset: Optional[Sequence[float]] = None) -> Tuple[Array, ...]:
-    """Returns a tuple of arrays containing the grid points along each axis.
+def pad_shard(array: jax.Array, width: int) -> jax.Array:
+    """
+    Collective function exchanging information between neighboring patches on the device grid.
+    `array` is the local shard of the global jax.Array of a field variable.
+    `array` gets padded with a padding layer of width `width` in x and y direction with values
+    from the neighboring cells (top, bottom and corners) s.t. the local arrays have overlapping
+    regions of width `width`.
 
     Args:
-      offset: an optional sequence of length `ndim`. The grid will be shifted by
-        `offset * self.step`.
+      array: The local shard of the global array
+      width: padding width.
 
     Returns:
-      An tuple of `self.ndim` arrays. The jth return value has shape
-      `[self.shape[j]]`.
-    """
-    if offset is None:
-      offset = self.cell_center
-    if len(offset) != self.ndim:
-      raise ValueError(f'unexpected offset length: {len(offset)} vs '
-                       f'{self.ndim}')
-    axes = []
-    for n, ((lower, _), offset_i, length, step) in enumerate(zip(self.domain, offset, self.shape, self.step)):
-      if self.periods:
-        axes.append((lower + (jnp.arange(length) + offset_i) * step)%self.periods[n])
-      else:
-        axes.append(lower + (jnp.arange(length) + offset_i) * step)
-    return tuple(axes)
-
-
-  def fft_axes(self) -> Tuple[Array, ...]:
-    """Returns the ordinal frequencies corresponding to the axes.
-
-    Transforms each axis into the *ordinal* frequencies for the Fast Fourier
-    Transform (FFT). Multiply by `2 * jnp.pi` to get angular frequencies.
-
-    Returns:
-      A tuple of `self.ndim` arrays. The jth return value has shape
-      `[self.shape[j]]`.
-    """
-    freq_axes = tuple(
-        jnp.fft.fftfreq(n, d=s) for (n, s) in zip(self.shape, self.step))
-    return freq_axes
-
-  def rfft_axes(self) -> Tuple[Array, ...]:
-    """Returns the ordinal frequencies corresponding to the axes.
-
-    Transforms each axis into the *ordinal* frequencies for the Fast Fourier
-    Transform (FFT). Most useful for doing computations for real-valued (not
-    complex valued) signals.
-
-    Multiply by `2 * jnp.pi` to get angular frequencies.
-
-    Returns:
-      A tuple of `self.ndim` arrays. The shape of each array matches the result
-      of rfftfreqs. Specifically, rfft is applied to the last dimension
-      resulting in an array of length `self.shape[-1] // 2`. Complex `fft` is
-      applied to the other dimensions resulting in shapes of size
-      `self.shape[j]`.
-    """
-    fft_axes = tuple(
-        jnp.fft.fftfreq(n, d=s)
-        for (n, s) in zip(self.shape[:-1], self.step[:-1]))
-    rfft_axis = (jnp.fft.rfftfreq(self.shape[-1], d=self.step[-1]),)
-    return fft_axes + rfft_axis
-
-  def mesh(self, offset: Optional[Sequence[float]] = None) -> Tuple[Array, ...]:
-    """Returns an tuple of arrays containing positions in each grid cell.
-
-    Args:
-      offset: an optional sequence of length `ndim`. The grid will be shifted by
-        `offset * self.step`.
-
-    Returns:
-      An tuple of `self.ndim` arrays, each of shape `self.shape`. In 3
-      dimensions, entry `self.mesh[n][i, j, k]` is the location of point
-      `i, j, k` in dimension `n`.
-    """
-    axes = self.axes(offset)
-    return tuple(jnp.meshgrid(*axes, indexing='ij'))
-
-  def rfft_mesh(self) -> Tuple[Array, ...]:
-    """Returns a tuple of arrays containing positions in rfft space."""
-    rfft_axes = self.rfft_axes()
-    return tuple(jnp.meshgrid(*rfft_axes, indexing='ij'))
-
-  def eval_on_mesh(self,
-                   fn: Callable[..., Array],
-                   offset: Optional[Sequence[float]] = None) -> GridArray:
-    """Evaluates the function on the grid mesh with the specified offset.
-
-    Args:
-      fn: A function that accepts the mesh arrays and returns an array.
-      offset: an optional sequence of length `ndim`.  If not specified, uses the
-        offset for the cell center.
-
-    Returns:
-      fn(x, y, ...) evaluated on the mesh, as a GridArray with specified offset.
-    """
-    if offset is None:
-      offset = self.cell_center
-    return GridArray(fn(*self.mesh(offset)), offset, self, 0)
-
-
-  def subgrid(self,index: tuple[int,int], width: int=0):
-    """
-    Create a subgrid of `Grid` for the index `index` on a device-mesh given by Grid.device_mesh.
-    Grid shape has to be divisble by Grid.device_mesh.axis_sizes.
-
+      jax.Array
     """
 
-    mesh_shape = self.device_mesh.axis_sizes
-    # for i, s in zip(index, mesh_shape):
-    #   if i >= s:
-    #     raise ValueError(f"subgrid index {index} incompatible with mesh-shape {mesh_shape}")
-    sub_domain = []
-    subdomain_shape = []
-    for n in range(self.ndim):
-      s = mesh_shape[n]
-      stride = self.shape[n]//s
-      subdomain_shape.append(stride + 2 * width)
-      sub_domain.append(
-        (self.domain[n][0]-width*self.step[n] + self.step[n]*(stride *index[n]), self.domain[n][0]+width*self.step[n] + self.step[n]*(stride *(index[n]+1)))
-      )
-      subgrid = Grid(shape=subdomain_shape, domain = sub_domain, periods=self.periods)
-    return subgrid
-
-def pad_shard(array: jax.Array, width: int)->jax.Array:
-  """
-  Collective function exchanging information between neighboring patches on the device grid.
-  `array` is the local shard of the global jax.Array of a field variable.
-  `array` gets padded with a padding layer of width `width` in x and y direction with values
-  from the neighboring cells (top, bottom and corners) s.t. the local arrays have overlapping 
-  regions of width `width`.
-
-  Args:
-    array: The local shard of the global array
-    width: padding width.
-
-  Returns:
-    jax.Array
-  """
-
-  I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j') # mganahl: a bit dirty
-  left_neighbors = jax.lax.ppermute(array[:,-width:], 'j', [(j, (j + 1) % J) for j in range(J)])
-  right_neighbors = jax.lax.ppermute(array[:,:width], 'j', [(j, (j - 1) % J) for j in range(J)])
-  extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[:width,:], right_neighbors[:width,:]], axis=1)
-  extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-width:,:],right_neighbors[-width:,:]],axis=1)
-  upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
-  lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
-  temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
-  return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
+    I, J = jax.lax.psum(1, "i"), jax.lax.psum(1, "j")  # mganahl: a bit dirty
+    left_neighbors = jax.lax.ppermute(
+        array[:, -width:], "j", [(j, (j + 1) % J) for j in range(J)]
+    )
+    right_neighbors = jax.lax.ppermute(
+        array[:, :width], "j", [(j, (j - 1) % J) for j in range(J)]
+    )
+    extended_top_row = jnp.concatenate(
+        [left_neighbors[:width, :], array[:width, :], right_neighbors[:width, :]],
+        axis=1,
+    )
+    extended_bot_row = jnp.concatenate(
+        [left_neighbors[-width:, :], array[-width:, :], right_neighbors[-width:, :]],
+        axis=1,
+    )
+    upper_neighbors = jax.lax.ppermute(
+        extended_bot_row, "i", [(i, (i + 1) % I) for i in range(I)]
+    )
+    lower_neighbors = jax.lax.ppermute(
+        extended_top_row, "i", [(i, (i - 1) % I) for i in range(I)]
+    )
+    temp = jnp.concatenate([left_neighbors, array, right_neighbors], axis=1)
+    return jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
 
 def update_padding_layer(array: jax.Array, width: int) -> jax.Array:
-  """
-  Collective function exchanging information between neighboring patches on the device grid.
-  `array` is the local, padded shard of the global jax.Array of a field variable.
-  the padding layer of `array` gets updated with with values from the neighboring cells
-  (top, bottom and corners) s.t. the local arrays have overlapping regions of width `width`.
+    """
+    Collective function exchanging information between neighboring patches on the device grid.
+    `array` is the local, padded shard of the global jax.Array of a field variable.
+    the padding layer of `array` gets updated with with values from the neighboring cells
+    (top, bottom and corners) s.t. the local arrays have overlapping regions of width `width`.
 
-  Args:
-    array: The local shard of the global array
-    width: padding width.
+    Args:
+      array: The local shard of the global array
+      width: padding width.
 
-  Returns:
-    jax.Array
-  """
+    Returns:
+      jax.Array
+    """
 
-  I, J = jax.lax.psum(1, 'i'), jax.lax.psum(1, 'j') # mganahl: a bit dirty
-  left_neighbors = jax.lax.ppermute(array[width:-width,-2*width:-width], 'j', [(j, (j + 1) % J) for j in range(J)])
-  right_neighbors = jax.lax.ppermute(array[width:-width,width:2*width], 'j', [(j, (j - 1) % J) for j in range(J)])
-  extended_top_row = jnp.concatenate([left_neighbors[:width,:], array[width:2*width,width:-width], right_neighbors[:width,:]], axis=1)
-  extended_bot_row = jnp.concatenate([left_neighbors[-width:,:],array[-2*width:-width,width:-width],right_neighbors[-width:,:]],axis=1)
-  upper_neighbors = jax.lax.ppermute(extended_bot_row, 'i', [(i, (i + 1) % I) for i in range(I)])
-  lower_neighbors = jax.lax.ppermute(extended_top_row, 'i', [(i, (i - 1) % I) for i in range(I)])
-  temp = jnp.concatenate([left_neighbors, array[width:-width, width:-width], right_neighbors], axis=1)
-  return  jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
+    I, J = jax.lax.psum(1, "i"), jax.lax.psum(1, "j")  # mganahl: a bit dirty
+    left_neighbors = jax.lax.ppermute(
+        array[width:-width, -2 * width : -width],
+        "j",
+        [(j, (j + 1) % J) for j in range(J)],
+    )
+    right_neighbors = jax.lax.ppermute(
+        array[width:-width, width : 2 * width],
+        "j",
+        [(j, (j - 1) % J) for j in range(J)],
+    )
+    extended_top_row = jnp.concatenate(
+        [
+            left_neighbors[:width, :],
+            array[width : 2 * width, width:-width],
+            right_neighbors[:width, :],
+        ],
+        axis=1,
+    )
+    extended_bot_row = jnp.concatenate(
+        [
+            left_neighbors[-width:, :],
+            array[-2 * width : -width, width:-width],
+            right_neighbors[-width:, :],
+        ],
+        axis=1,
+    )
+    upper_neighbors = jax.lax.ppermute(
+        extended_bot_row, "i", [(i, (i + 1) % I) for i in range(I)]
+    )
+    lower_neighbors = jax.lax.ppermute(
+        extended_top_row, "i", [(i, (i - 1) % I) for i in range(I)]
+    )
+    temp = jnp.concatenate(
+        [left_neighbors, array[width:-width, width:-width], right_neighbors], axis=1
+    )
+    return jnp.concatenate([upper_neighbors, temp, lower_neighbors], axis=0)
 
 
 def domain_interior_masks(grid: Grid):
-  """Returns cell face arrays with 1 on the interior, 0 on the boundary."""
-  masks = []
-  for offset in grid.cell_faces:
-    mesh = grid.mesh(offset)
-    mask = 1
-    for i, x in enumerate(mesh):
-      lower = (np.invert(np.isclose(x, grid.domain[i][0]))).astype('int')
-      upper = (np.invert(np.isclose(x, grid.domain[i][1]))).astype('int')
-      mask = mask * upper * lower
-    masks.append(mask)
-  return tuple(masks)
-
-
-
-
-
-
+    """Returns cell face arrays with 1 on the interior, 0 on the boundary."""
+    masks = []
+    for offset in grid.cell_faces:
+        mesh = grid.mesh(offset)
+        mask = 1
+        for i, x in enumerate(mesh):
+            lower = (np.invert(np.isclose(x, grid.domain[i][0]))).astype("int")
+            upper = (np.invert(np.isclose(x, grid.domain[i][1]))).astype("int")
+            mask = mask * upper * lower
+        masks.append(mask)
+    return tuple(masks)

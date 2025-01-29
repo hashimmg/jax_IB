@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import pdb
 from jax_ib.base.grids import GridVariable
 
-def gaussian(x: jax.Array,mu: jax.Array,sigma:jax.Array)->float:
+
+def gaussian(x: jax.Array, mu: jax.Array, sigma: jax.Array) -> float:
     """
     A standard gaussian. Used to approximate delta functions.
 
@@ -15,13 +16,16 @@ def gaussian(x: jax.Array,mu: jax.Array,sigma:jax.Array)->float:
     Returns:
       float: The value of the gaussian
     """
-    return 1/(sigma*jnp.sqrt(2*jnp.pi))*jnp.exp(-0.5*((x-mu)/sigma)**2)
+    return 1 / (sigma * jnp.sqrt(2 * jnp.pi)) * jnp.exp(-0.5 * ((x - mu) / sigma) ** 2)
 
 
-def mesh_convolve(field:GridVariable,
-                  x:jax.Array,
-                  y:jax.Array,
-                  dirac_delta_approx: callable, axis_names:list[str]) -> jax.Array:
+def mesh_convolve(
+    field: GridVariable,
+    x: jax.Array,
+    y: jax.Array,
+    dirac_delta_approx: callable,
+    axis_names: list[str],
+) -> jax.Array:
     """
     Compute the convolution of sharded array `field` with 2d-dirac-delta functions located at `x, y`.
     The convolution is computed for each pair `x[i], y[i]` in parallel.
@@ -40,13 +44,15 @@ def mesh_convolve(field:GridVariable,
     """
     local_conv = convolve(field, x, y, dirac_delta_approx)
     return jax.lax.psum(
-      jax.lax.psum(local_conv, axis_name = axis_names[0]),
-      axis_name = axis_names[1])
+        jax.lax.psum(local_conv, axis_name=axis_names[0]), axis_name=axis_names[1]
+    )
 
 
 # TODO: the dirac delta function should be removed as input
-@jax.tree_util.Partial(jax.vmap, in_axes=(None, 0,0, None))
-def convolve(field:GridVariable,xp:float,yp:float, dirac_delta_approx: callable) -> jax.Array:
+@jax.tree_util.Partial(jax.vmap, in_axes=(None, 0, 0, None))
+def convolve(
+    field: GridVariable, xp: float, yp: float, dirac_delta_approx: callable
+) -> jax.Array:
     """
     Computes the 2-d convolution of the data in `fields.data` with a
     discrete approximation of the delta function. I.e. for a grid (i,j)
@@ -73,35 +79,44 @@ def convolve(field:GridVariable,xp:float,yp:float, dirac_delta_approx: callable)
     """
     grid = field.grid
     offset = field.offset
-    X,Y = grid.mesh(offset)
+    X, Y = grid.mesh(offset)
     dx = grid.step[0]
     dy = grid.step[1]
-    return jnp.sum(field.data*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dx*dy)
+    return jnp.sum(
+        field.data
+        * dirac_delta_approx(xp, X, dx)
+        * dirac_delta_approx(yp, Y, dy)
+        * dx
+        * dy
+    )
 
 
-def surf_fn_deprecated(field,xp,yp,discrete_fn):
+def surf_fn_deprecated(field, xp, yp, discrete_fn):
     """
-    Deprecated; use `convolve` above """
+    Deprecated; use `convolve` above"""
     grid = field.grid
     offset = field.offset
-    X,Y = grid.mesh(offset)
+    X, Y = grid.mesh(offset)
     dx = grid.step[0]
     dy = grid.step[1]
-    def calc_force(xp,yp):
-        return jnp.sum(field.data*discrete_fn(xp,X,dx)*discrete_fn(yp,Y,dy)*dx*dy)
+
+    def calc_force(xp, yp):
+        return jnp.sum(
+            field.data * discrete_fn(xp, X, dx) * discrete_fn(yp, Y, dy) * dx * dy
+        )
 
     def foo(tree_arg):
-        xp,yp = tree_arg
-        return calc_force(xp,yp)
+        xp, yp = tree_arg
+        return calc_force(xp, yp)
 
     def foo_pmap(tree_arg):
-        return jax.vmap(foo,in_axes=1)(tree_arg)
+        return jax.vmap(foo, in_axes=1)(tree_arg)
 
-    divider=jax.device_count()
-    n = len(xp)//divider
+    divider = jax.device_count()
+    n = len(xp) // divider
     mapped = []
     for i in range(divider):
-        mapped.append([xp[i*n:(i+1)*n],yp[i*n:(i+1)*n]])
+        mapped.append([xp[i * n : (i + 1) * n], yp[i * n : (i + 1) * n]])
     arr = jnp.array(mapped)
     U_deltas = jax.pmap(foo_pmap)(jnp.array(mapped))
     return U_deltas.flatten()
