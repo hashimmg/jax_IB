@@ -202,7 +202,6 @@ def semi_implicit_navier_stokes_timeBC(
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_updated,
     IBM_forcing: IBMFn = None,
-    Updating_Position: PosFn = None,
     Pressure_Grad: GradPFn = finite_differences.forward_difference,
     Drag_fn: DragFn = None,
 ) -> Callable[[GridVariableVector], GridVariableVector]:
@@ -223,7 +222,6 @@ def semi_implicit_navier_stokes_timeBC(
     )
     Reserve_BC = explicit_Reserve_BC(ReserveBC=boundaries.Reserve_BC, step_time=dt)
     update_BC = explicit_update_BC(updateBC=boundaries.update_BC, step_time=dt)
-    # IBM_force = explicit_IBM_Force(cal_IBM_force = IBM_forcing, step_time = dt)
     IBM_force = IBM_forcing
     Pressure_Grad = explicit_Pressure_Gradient(cal_Pressure_Grad=Pressure_Grad)
     Calculate_Drag = explicit_Calc_Drag(cal_Drag=Drag_fn, step_time=dt)

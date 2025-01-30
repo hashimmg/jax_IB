@@ -89,34 +89,3 @@ def convolve(
         * dx
         * dy
     )
-
-
-def surf_fn_deprecated(field, xp, yp, discrete_fn):
-    """
-    Deprecated; use `convolve` above"""
-    grid = field.grid
-    offset = field.offset
-    X, Y = grid.mesh(offset)
-    dx = grid.step[0]
-    dy = grid.step[1]
-
-    def calc_force(xp, yp):
-        return jnp.sum(
-            field.data * discrete_fn(xp, X, dx) * discrete_fn(yp, Y, dy) * dx * dy
-        )
-
-    def foo(tree_arg):
-        xp, yp = tree_arg
-        return calc_force(xp, yp)
-
-    def foo_pmap(tree_arg):
-        return jax.vmap(foo, in_axes=1)(tree_arg)
-
-    divider = jax.device_count()
-    n = len(xp) // divider
-    mapped = []
-    for i in range(divider):
-        mapped.append([xp[i * n : (i + 1) * n], yp[i * n : (i + 1) * n]])
-    arr = jnp.array(mapped)
-    U_deltas = jax.pmap(foo_pmap)(jnp.array(mapped))
-    return U_deltas.flatten()

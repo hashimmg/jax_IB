@@ -510,8 +510,6 @@ class TimeDependentBoundaryConditions(ConstantBoundaryConditions):
         time_stamp: Optional[float],
     ):
 
-        # ndim = len(types)
-        # values = ((0.0, 0.0),) * ndim
         super(TimeDependentBoundaryConditions, self).__init__(
             types, values, boundary_fn, time_stamp
         )
@@ -545,7 +543,7 @@ def Reserve_BC(
     v = all_variable.velocity
     ts = (
         v[0].bc.time_stamp + dt
-    )  # v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+    )
 
     return _boundary_update(all_variable, ts, 0.0)
 
@@ -556,7 +554,7 @@ def update_BC(
     v = all_variable.velocity
     ts = (
         v[0].bc.time_stamp + dt
-    )  # v[0].bc.time_stamp #v[0].bc.update_bc_(v[0].bc.time_stamp,dt)
+    )
     out = _boundary_update(all_variable, ts, ts)
     return out
 
@@ -865,39 +863,15 @@ def get_pressure_bc_from_velocity(v: GridVariableVector) -> BoundaryConditions:
     bc_value = ((0.0, 0.0), (0.0, 0.0))
     Bc_f = v[
         0
-    ].bc.boundary_fn  # mganahl: this is quite strange to do, but changing it breaks the code currently; this needs to be cleaned up
+    ].bc.boundary_fn
     for velocity_bc_type in velocity_bc_types:
         if velocity_bc_type == "periodic":
             pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
         else:
             pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
-    # mganahl: why time_stamp=2.0???
+    # mganahl: why time_stamp=2.0?
     return ConstantBoundaryConditions(
         values=bc_value, time_stamp=2.0, types=pressure_bc_types, boundary_fn=Bc_f
-    )
-
-
-def get_pressure_bc_from_velocity_deprecated(
-    v: GridVariableVector, boundary_fn
-) -> ConstantBoundaryConditions:
-    """Returns pressure boundary conditions for the specified velocity variables.
-    Assumes 2d geometry"""
-    # assumes that if the boundary is not periodic, pressure BC is zero flux.
-    # TODO: this is not particularly clean, need to improve
-    velocity_bc_types = consistent_boundary_conditions(*v)
-    pressure_bc_types = []
-    for velocity_bc_type in velocity_bc_types:
-        if velocity_bc_type == "periodic":
-            pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
-        else:
-            pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
-    # mganahl: why time_stamp=2.0???
-    bc_value = ((0.0, 0.0), (0.0, 0.0))
-    return ConstantBoundaryConditions(
-        values=bc_value,
-        time_stamp=2.0,
-        types=pressure_bc_types,
-        boundary_fn=boundary_fn,
     )
 
 

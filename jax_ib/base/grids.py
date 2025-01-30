@@ -680,14 +680,6 @@ def consistent_grid(*arrays: Union[GridArray, GridVariable]) -> Grid:
     return arrays[0].grid
 
 
-# def consistent_grid(*arrays: Union[GridArray, GridVariable]) -> Grid:
-#   """Returns the unique grid, or raises InconsistentGridError."""
-#   grids = {array.grid for array in arrays}
-#   if len(grids) != 1:
-#     raise InconsistentGridError(f'arrays do not have a unique grid: {grids}')
-#   grid, = grids
-#   return grid
-
 
 class InconsistentBoundaryConditionsError(Exception):
     """Raised for cases of inconsistent bc between GridVariables."""
