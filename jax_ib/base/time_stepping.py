@@ -191,7 +191,7 @@ def navier_stokes_rk_updated(
             k[i] = explicit_terms(u[i])
 
         # mganahl: why is dP below not multiplied by dt?
-        u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j]) - dP
+        u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j]) - dP * dt #mganahl clarify with Mohammed correctness
 
         Force = tree_math.Vector(IBM(u_star.tree, time, dt))
         u_star_star = u_star + dt * Force
@@ -240,8 +240,10 @@ def get_step_fn_sharded(
         )
         del local_pressure
 
-        us[0].array.data -= temp[0].data
-        us[1].array.data -= temp[1].data
+        # mganahl: clarify with Mohammed if this is correct
+        # this deviates from the original implementation
+        us[0].array.data -= dt*temp[0].data
+        us[1].array.data -= dt*temp[1].data
 
         temp = IBM_Force.immersed_boundary_force(
             us, [obj_fn], convolution_functions.gaussian, surface_velocity_fn, t, dt
