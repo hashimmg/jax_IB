@@ -5,7 +5,6 @@ from jax.sharding import PartitionSpec
 
 
 class Dist(Enum):
-
     """Describes a SLAB data decomposition
 
     For a X*Y*Z array, SLABS_X indicates the array is
@@ -16,14 +15,14 @@ class Dist(Enum):
     of size X*(Y // nGPUs)*Z.
     """
 
-    SLABS_X = 'SLABS_X'
-    SLABS_Y = 'SLABS_Y'
+    SLABS_X = "SLABS_X"
+    SLABS_Y = "SLABS_Y"
 
     @staticmethod
     def create(string):
-        if string == 'X':
+        if string == "X":
             return Dist.SLABS_X
-        elif string == 'Y':
+        elif string == "Y":
             return Dist.SLABS_Y
         else:
             raise RuntimeError("Wrong dist")
@@ -51,17 +50,9 @@ class Dist(Enum):
     def slab_shape(self, fft_dims):
         ngpus = jax.device_count()
         if self == Dist.SLABS_X:
-            return (
-                fft_dims[0] // ngpus,
-                fft_dims[1],
-                *fft_dims[2:]
-            )
+            return (fft_dims[0] // ngpus, fft_dims[1], *fft_dims[2:])
         else:
-            return (
-                fft_dims[0],
-                fft_dims[1] // ngpus,
-                *fft_dims[2:]
-            )
+            return (fft_dims[0], fft_dims[1] // ngpus, *fft_dims[2:])
 
     def fft_shape(self, local_shape):
         ngpus = jax.device_count()
@@ -69,7 +60,6 @@ class Dist(Enum):
             return (local_shape[0] * ngpus, local_shape[1], *local_shape[2:])
         else:
             return (local_shape[0], local_shape[1] * ngpus, *local_shape[2:])
-
 
     @property
     def part_spec(dist):
@@ -80,7 +70,6 @@ class Dist(Enum):
 
 
 class Dir(Enum):
-
     """Describe the FFT direction
 
     FWD is the forward, unnormalized, direction.
@@ -88,8 +77,8 @@ class Dir(Enum):
     with N the product of the dimensions.
     """
 
-    FWD = 'FWD'
-    INV = 'INV'
+    FWD = "FWD"
+    INV = "INV"
 
     @property
     def _C_enum(dir):
