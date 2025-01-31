@@ -7,12 +7,12 @@ from jax_ib.base.particle_class import Particle
 
 def immersed_boundary_force_per_particle(
     velocity_field: tuple[GridVariable, GridVariable],
-    particle: callable,
+    obj_fn: callable,
     dirac_delta_approx: callable,
     surface_velocity: callable,
     t: float,
     dt: float,
-) -> jax.Array:
+) -> tuple[jax.Array, jax.Array]:
     """
     Compute the x and y forces from an immersed object. The object is represented as a point-cloud, as returned by `shape_fn`.
     The 2-d velocity field is given by a GridArrayVector `velocity_field`.  `geom_param` and `Grid_p` are parameters passed
@@ -22,7 +22,7 @@ def immersed_boundary_force_per_particle(
 
     Args:
       velocity_field: the velocity field, i.e. vx or vy component
-      particle: Callable computing the particle geometry at time `t`. Signature is `x, y = particle(t)`. The particle
+      obj_fn: Callable computing the obj_fn geometry at time `t`. Signature is `x, y = obj_fn(t)`. The object
         is represented as a point cloud `x, y`. The function has to be jax differentiable w.r.t. `t`.
       dirac_delta_approx: Approximation to the delta function
       surface_velocity: Callable which computes the surface-integral `sum_{i,j} data[i,j] delta(x[i]-xp]) delta(y[j]-yp)  dx  dy)`
@@ -38,8 +38,8 @@ def immersed_boundary_force_per_particle(
     X, Y = ux.grid.mesh(ux.offset)  # 2d is hard coded right now
     dx = ux.grid.step[0]
 
-    xp, yp = particle(t)
-    UPx, UPy = jax.jacfwd(particle)(t)
+    xp, yp = obj_fn(t)
+    UPx, UPy = jax.jacfwd(obj_fn)(t)
 
     ux_at_surface = surface_velocity(ux, xp, yp)
     uy_at_surface = surface_velocity(uy, xp, yp)
@@ -61,15 +61,17 @@ def immersed_boundary_force_per_particle(
         # return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2
 
     vmapped_calc_force = jax.vmap(calc_force, in_axes=0)
-    # TODO (mganahl): the two vmap calls can be done in parallel as well
+    # TODO (mganahl): the two vmap calls can be done in parallel
     return jnp.sum(vmapped_calc_force(forcex, xp, yp, dS), axis=0), jnp.sum(
         vmapped_calc_force(forcey, xp, yp, dS), axis=0
     )
 
 
+# mganahl: this function is strictly speaking not needed. Multiple particles can be handeled
+# in principle on the level of a single callable,
 def immersed_boundary_force(
     velocity_field: tuple[GridVariable, GridVariable],
-    particles: list[callable],
+    obj_fns: list[callable],
     dirac_delta_approx: callable,
     surface_fn: callable,
     t: float,
@@ -77,7 +79,7 @@ def immersed_boundary_force(
 ) -> tuple[GridVariable, GridVariable]:
     """
     Compute x and y components force from a array of immersed objects. Each object is represented as a point-cloud,
-    as returned by the callable `particle.shape`.
+    as returned by the callable `obj_fn`.
     The 2-d velocity field is given by a GridArrayVector `velocity_field`.  `geom_param` and `Grid_p` are parameters passed
     to `shape_fn` required to compute the point cloud of the object.
 
@@ -85,9 +87,9 @@ def immersed_boundary_force(
 
     Args:
       velocity_field: the velocity field, i.e. vx or vy component
-      particles: the immersed particles, represented as an iterable of callables; each callable
+      obj_fns: the immersed objects, represented as an iterable of callables; each callable
         in the list has to have a signature `x,y = f(float: t)`, with `t` the time, and `x,y,` the
-        2-d point cloud representing the particle/object at time `t`.
+        2-d point cloud representing the objects at time `t`.
       dirac_delta_approx: Approximation to the delta function
       surface_fn: Callable which computes the surface-integral `sum_{i,j} data[i,j] delta(x[i]-xp]) delta(y[j]-yp)  dx  dy)`
         for velocity_field[0].data and velocity_field[1].data (x- and y-components of the velocities)
@@ -101,9 +103,9 @@ def immersed_boundary_force(
     forcey = jnp.zeros_like(velocity_field[1].data)
 
     # run over all particles; the final force is the sum of all individual forces per particle
-    for particle in particles:
+    for obj_fn in obj_fns:
         per_object_forcex, per_object_forcey = immersed_boundary_force_per_particle(
-            velocity_field, particle, dirac_delta_approx, surface_fn, t, dt
+            velocity_field, obj_fn, dirac_delta_approx, surface_fn, t, dt
         )
         forcex += per_object_forcex
         forcey += per_object_forcey
