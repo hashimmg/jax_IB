@@ -541,9 +541,7 @@ def Reserve_BC(
     all_variable: particle_class.All_Variables, dt: float
 ) -> particle_class.All_Variables:
     v = all_variable.velocity
-    ts = (
-        v[0].bc.time_stamp + dt
-    )
+    ts = v[0].bc.time_stamp + dt
 
     return _boundary_update(all_variable, ts, 0.0)
 
@@ -552,9 +550,7 @@ def update_BC(
     all_variable: particle_class.All_Variables, dt: float
 ) -> particle_class.All_Variables:
     v = all_variable.velocity
-    ts = (
-        v[0].bc.time_stamp + dt
-    )
+    ts = v[0].bc.time_stamp + dt
     out = _boundary_update(all_variable, ts, ts)
     return out
 
@@ -861,9 +857,7 @@ def get_pressure_bc_from_velocity(v: GridVariableVector) -> BoundaryConditions:
     velocity_bc_types = consistent_boundary_conditions(*v)
     pressure_bc_types = []
     bc_value = ((0.0, 0.0), (0.0, 0.0))
-    Bc_f = v[
-        0
-    ].bc.boundary_fn
+    Bc_f = v[0].bc.boundary_fn
     for velocity_bc_type in velocity_bc_types:
         if velocity_bc_type == "periodic":
             pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))

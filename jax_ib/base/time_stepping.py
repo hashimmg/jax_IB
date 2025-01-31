@@ -19,6 +19,7 @@ from jax_ib.base import particle_class
 
 PyTreeState = TypeVar("PyTreeState")
 TimeStepFn = Callable[[PyTreeState], PyTreeState]
+from jax_ib.base.grids import GridVariable, GridArray
 
 
 class ExplicitNavierStokesODE_Penalty:
@@ -191,7 +192,9 @@ def navier_stokes_rk_updated(
             k[i] = explicit_terms(u[i])
 
         # mganahl: why is dP below not multiplied by dt?
-        u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j]) - dP * dt #mganahl clarify with Mohammed correctness
+        u_star = (
+            u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j]) - dP * dt
+        )  # mganahl clarify with Mohammed correctness
 
         Force = tree_math.Vector(IBM(u_star.tree, time, dt))
         u_star_star = u_star + dt * Force
@@ -211,18 +214,46 @@ def navier_stokes_rk_updated(
 
 
 def get_step_fn_sharded(
-    laplacian_eigenvalues, dt, width, obj_fn, explicit_update_fn, surface_velocity_fn
-):
+    laplacian_eigenvalues: tuple[jax.Array, jax.Array],
+    dt: float,
+    width: int,
+    obj_fn: callable,
+    explicit_update_fn: callable,
+    surface_velocity_fn: callable,
+) -> callable:
+    """
+    Return the function that performes an update step of pressure and velocity
+    fields for the incompressible Navier Stokes equation.
+
+    Args:
+      laplacian_eigenvalues: The eigenvalues of the iscretized 1d laplacian operators
+        for each spatial dimension
+      dt: The time step
+      width: The padding width for the local shards of the arrays
+      obj_fn: Callable returning immersed objects as a point cloud at asolute time `t`.
+        Signature is `x, y = obj_fn(t)`. The function has to be jax differentiable w.r.t. `t`.
+      explicit_update_fn: A callable with signature
+        `explicit_update_fn(tuple[GridVariable, GridVariable]) -> tuple[GridVariable, GridVariable]`.
+        Computes the local update of velocities coresponding to advection, diffusion and force-terms.
+      surace_velocity_fn: A callable with signature
+        `surface_velocity_fn(field:GridVariable, x:jax.Array, y:jax.Array) -> jax.Array`.
+        Computes the values of its input `field` at the positions `x,y`.
+
+    Returns:
+      callable: The step function for a single update step. The signature of the this function is
+        step_fn(args: tuple[pressure: GridVariable, velocities: tuple[GridVariable, GridVariable], time: float]) -> tuple[GridVariable, tuple[GridVariable, GridVariable], float]
+    """
     cutoff = 10 * jnp.finfo(jnp.float32).eps
     eigvals = jnp.add.outer(laplacian_eigenvalues[0], laplacian_eigenvalues[1].T)
     pinv = fast_diagonalization.pseudo_poisson_inversion(
         eigvals, jnp.complex128, ("i", "j"), cutoff
     )
 
-    def step_fn(step, args):
-
-        p, us, reference_time = args
-        t = reference_time + step * dt
+    def step_fn(
+        args: tuple[GridVariable, tuple[GridVariable, GridVariable], float],
+    ) -> tuple[GridVariable, tuple[GridVariable, GridVariable], float]:
+        """single  update step"""
+        p, us, t = args
 
         local_velocities = tuple([u.shard_pad(width) for u in us])
         temp = tuple([v.crop(width) for v in explicit_update_fn(local_velocities)])
@@ -242,8 +273,8 @@ def get_step_fn_sharded(
 
         # mganahl: clarify with Mohammed if this is correct
         # this deviates from the original implementation
-        us[0].array.data -= dt*temp[0].data
-        us[1].array.data -= dt*temp[1].data
+        us[0].array.data -= dt * temp[0].data
+        us[1].array.data -= dt * temp[1].data
 
         temp = IBM_Force.immersed_boundary_force(
             us, [obj_fn], convolution_functions.gaussian, surface_velocity_fn, t, dt
@@ -256,7 +287,7 @@ def get_step_fn_sharded(
             p, us, pinv, width
         )
 
-        return local_pressure, local_u_projected, reference_time
+        return local_pressure, local_u_projected, t + dt
 
     return step_fn
 
@@ -268,11 +299,59 @@ def evolve_navier_stokes_sharded(
     reference_time,
     dt,
     width,
-    num_steps,
+    inner_steps,
+    outer_steps,
     obj_fn,
     explicit_update_fn,
     surface_velocity_fn,
+    data_processing_inner=None,
+    data_processing_outer=None,
 ):
+    """
+    Evolve `pressure` and velocities` using, the incompressible Navier Stokes equation.
+
+    Args:
+      pressure: Pressure variable on a grid.
+      velocities: Tuple of velocity variables on a grid.
+      laplacian_eigenvalues: The eigenvalues of the iscretized 1d laplacian operators
+        for each spatial dimension
+      reference_time: The initial time. Required to compute the values of `obj_fn(reference_time + n_steps * dt)`,
+        see below.
+      dt: The time step
+      width: The padding width for the local shards of the arrays
+      inner_steps: Number of "inner" steps to perform. No data is accumulated during these steps.
+      outer_steps: Number of "outer" steps to perform. Data is accumulated during these steps using jax.lax.scan.
+      obj_fn: Callable returning immersed objects as a point cloud at asolute time `t`.
+        Signature is `x, y = obj_fn(t)`. The function has to be jax differentiable w.r.t. `t`.
+      explicit_update_fn: A callable with signature
+        `explicit_update_fn(tuple[GridVariable, GridVariable]) -> tuple[GridVariable, GridVariable]`.
+        Computes the local update of velocities coresponding to advection, diffusion and force-terms.
+      surace_velocity_fn: A callable with signature
+        `surface_velocity_fn(field:GridVariable, x:jax.Array, y:jax.Array) -> jax.Array`.
+        Computes the values of its input `field` at the positions `x,y`.
+      data_processing_inner: A function with signature
+        data_processing_int(tuple[GridVariable, tuple[GridVariable, GridVariable],float]) -> Any
+        The outpout of this function is accumulated using jax.lax.scan over the inner loop and
+        passed into `data_processing_outer` during the outer loop. For `None`, defaults to `lambda *args: None`.
+      data_processing_outer: A function with signature
+        data_processing_outer(tuple[GridVariable, tuple[GridVariable, GridVariable],float], Any) -> Any
+        The output of the `data_processing_inner` is passed in as the second argument to `data_processing_outer`.
+        The outpout of this function is accumulated using jax.lax.scan over the outer loop and returned
+        to the caller. For `None`, defaults to `lambda *args: None`.
+
+    Returns:
+      GridVariable: The final pressure
+      tuple[GridVariable, GridVariable]: The final velocities
+      Any: The accumulated (stacked) output of `data_processing_outer` over the outer loops.
+        For `data_processing_outer=None` equals `None`.
+
+    """
+
+    if data_processing_inner is None:
+        data_processing_inner = lambda *args: None
+
+    if data_processing_outer is None:
+        data_processing_outer = lambda *args: None
 
     step_fun = get_step_fn_sharded(
         laplacian_eigenvalues,
@@ -290,20 +369,36 @@ def evolve_navier_stokes_sharded(
     local_pressure = pressure.to_subgrid((i, j))
     local_velocities = tuple([u.to_subgrid((i, j)) for u in velocities])
 
+    # inner loop running over `inner_steps`
+    # def inner(args):
+    #     return jax.lax.fori_loop(
+    #         0, inner_steps, lambda n, args_2: step_fun(args_2), args
+    #     )
+
+    def _step_fun(carry, x):
+        result = step_fun(carry)
+        return result, data_processing_inner(result)
+
+    def inner(args):
+        carry, y = jax.lax.scan(_step_fun, args, xs=None, length=inner_steps)
+        return carry, y
+
+    # outer loop running over `outer_steps`
+    def outer(carry, x):
+        result, y = inner(carry)
+        return result, data_processing_outer(result, y)
+
     # initial values for for_loop
     init = (local_pressure, local_velocities, reference_time)
+    carry, y = jax.lax.scan(outer, init, xs=None, length=outer_steps)
+    final_pressure, final_velocities, _ = carry
 
-    local_pressure, local_velocities, _ = jax.lax.fori_loop(
-        0, num_steps, step_fun, init
-    )
-
-    # change grids back to global grid
-    local_pressure.array.grid = pressure.grid
-    local_velocities[0].array.grid = velocities[0].grid
-    local_velocities[1].array.grid = velocities[1].grid
+    final_pressure.array.grid = pressure.grid
+    final_velocities[0].array.grid = velocities[0].grid
+    final_velocities[1].array.grid = velocities[1].grid
 
     # return results
-    return local_pressure, local_velocities
+    return final_pressure, final_velocities, y
 
 
 def navier_stokes_rk_penalty(

@@ -680,7 +680,6 @@ def consistent_grid(*arrays: Union[GridArray, GridVariable]) -> Grid:
     return arrays[0].grid
 
 
-
 class InconsistentBoundaryConditionsError(Exception):
     """Raised for cases of inconsistent bc between GridVariables."""
 
