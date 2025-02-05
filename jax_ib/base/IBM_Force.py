@@ -48,23 +48,19 @@ def immersed_boundary_force_per_particle(
     _dx = jnp.roll(x, -1, axis=0) - x
     dS = jnp.sqrt(jnp.sum(_dx**2, axis=1))
 
-    def calc_force(F, _x, ds):
+    def calc_force(_F, _x, _ds):
         return (
-            F
+            _F
             * dirac_delta_approx(jnp.sqrt((_x[0] - X) ** 2 + (_x[1] - Y) ** 2), 0, dx)
-            * ds
+            * _ds
         )
         # return F*dirac_delta_approx(xp-X,0,dx)*dirac_delta_approx(yp-Y,0,dy)*dss
         # return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2
 
-    def body(step, args):
-        result, (F, _x, ds) = args
-        y = calc_force(F[step], _x[step], ds[step])
-        return result + y, (F, x, ds)
-
+    body = lambda step, result: result+calc_force(F[step], x[step], dS[step])
     init = (
         jnp.zeros((2, *X.shape), X.dtype),
-        (jnp.expand_dims(force, axis=(2, 3)), x, dS),
+        (jnp.expand_dims(force, axis=(2, 3))),
     )
     res, _ = jax.lax.fori_loop(0, x.shape[0], body, init)
 
