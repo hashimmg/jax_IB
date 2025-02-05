@@ -249,7 +249,9 @@ def get_step_fn_sharded(
         eigvals, jnp.complex128, ("i", "j"), cutoff
     )
 
-    surface_velocity_fn = lambda f,x: convolution_functions.mesh_convolve(f,x,convolution_functions.gaussian, axis_names=axis_names, vmapped=False)
+    surface_velocity_fn = lambda f, x: convolution_functions.mesh_convolve(
+        f, x, convolution_functions.gaussian, axis_names=axis_names, vmapped=False
+    )
 
     def step_fn(
         args: tuple[GridVariable, tuple[GridVariable, GridVariable], float],

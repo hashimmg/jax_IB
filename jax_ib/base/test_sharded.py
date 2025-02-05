@@ -605,7 +605,6 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
         forcing=None,
     )
 
-
     evolve = jax.jit(
         shard_map(
             time_stepping.evolve_navier_stokes_sharded,
@@ -645,7 +644,7 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
         outer_steps,
         obj_fn,
         explicit_update,
-        ('i','j'),
+        ("i", "j"),
         None,
         lambda args, y: args,
     )
