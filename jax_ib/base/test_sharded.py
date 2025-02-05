@@ -70,7 +70,7 @@ def ellipse_trajectory(
         + y * jnp.cos(angular_rotation_speed * t)
         + center_of_mass[1]
     )
-    return xp, yp
+    return jnp.stack([xp, yp], axis=1)
 
 
 @pytest.fixture
@@ -338,16 +338,21 @@ def test_upwind_interpolation(mesh, N):
 
 
 @pytest.mark.parametrize("N", [64])
-def test_convolve(mesh, N, obj_fn):
+@pytest.mark.parametrize("vmapped", [True, False])
+def test_convolve(mesh, N, obj_fn, vmapped):
     @partial(shard_map, mesh=mesh, in_specs=(P("i", "j"), None, None), out_specs=P())
     def convolve_distributed(variable, obj_fn, t):
-        x, y = obj_fn(t)
+        x = obj_fn(t)
         i = jax.lax.axis_index("i")
         j = jax.lax.axis_index("j")
 
         local_variable = variable.to_subgrid((i, j))
         local_convolve = convolution_functions.mesh_convolve(
-            local_variable, x, y, convolution_functions.gaussian, axis_names=["i", "j"]
+            local_variable,
+            x,
+            convolution_functions.gaussian,
+            axis_names=["i", "j"],
+            vmapped=vmapped,
         )
         return local_convolve
 
@@ -355,16 +360,18 @@ def test_convolve(mesh, N, obj_fn):
     grid = grids.Grid((N, N), domain=((0, L), (0, L)), device_mesh=mesh, periods=(L, L))
     _, pressure = setup_variables(grid)
     t = 1.0
-    x, y = obj_fn(t)
-    expected = convolution_functions.convolve(
-        pressure, x, y, convolution_functions.gaussian
+    x = obj_fn(t)
+
+    expected = jax.vmap(convolution_functions.convolve, in_axes=(None, 0, None))(
+        pressure, x, convolution_functions.gaussian
     )
     actual = convolve_distributed(pressure, obj_fn, t)
     np.testing.assert_allclose(actual, expected)
 
 
 @pytest.mark.parametrize("N", [64])
-def test_immersed_boundary_force(mesh, N, obj_fns):
+@pytest.mark.parametrize("vmapped", [True, False])
+def test_immersed_boundary_force(mesh, N, obj_fns, vmapped):
     @partial(
         shard_map,
         mesh=mesh,
@@ -376,8 +383,8 @@ def test_immersed_boundary_force(mesh, N, obj_fns):
         j = jax.lax.axis_index("j")
 
         local_velocities = tuple([u.to_subgrid((i, j)) for u in velocities])
-        surface_velocity = lambda f, x, y: convolution_functions.mesh_convolve(
-            f, x, y, convolution_functions.gaussian, axis_names=["i", "j"]
+        surface_velocity = lambda f, x: convolution_functions.mesh_convolve(
+            f, x, convolution_functions.gaussian, axis_names=["i", "j"], vmapped=vmapped
         )
 
         forcex, forcey = IBM_Force.immersed_boundary_force(
@@ -395,10 +402,8 @@ def test_immersed_boundary_force(mesh, N, obj_fns):
     L = 5.0
     grid = grids.Grid((N, N), domain=((0, L), (0, L)), device_mesh=mesh, periods=(L, L))
     velocities, _ = setup_variables(grid)
-
-    surface_velocity = lambda field, x, y: convolution_functions.convolve(
-        field, x, y, convolution_functions.gaussian
-    )
+    vconv = jax.vmap(convolution_functions.convolve, in_axes=(None, 0, None))
+    surface_velocity = lambda field, x: vconv(field, x, convolution_functions.gaussian)
     expected = IBM_Force.immersed_boundary_force(
         velocities, obj_fns, convolution_functions.gaussian, surface_velocity, t, dt
     )
@@ -408,7 +413,8 @@ def test_immersed_boundary_force(mesh, N, obj_fns):
 
 @pytest.mark.parametrize("N", [64])
 @pytest.mark.parametrize("num_steps", [10, 1000])
-def test_update_step(mesh, N, num_steps, obj_fns):
+@pytest.mark.parametrize("vmapped", [True, False])
+def test_update_step(mesh, N, num_steps, obj_fns, vmapped):
     @partial(
         shard_map,
         mesh=mesh,
@@ -443,8 +449,8 @@ def test_update_step(mesh, N, num_steps, obj_fns):
             forcing=None,
         )
 
-        surface_velocity = lambda f, x, y: convolution_functions.mesh_convolve(
-            f, x, y, convolution_functions.gaussian, axis_names=["i", "j"]
+        surface_velocity = lambda f, x: convolution_functions.mesh_convolve(
+            f, x, convolution_functions.gaussian, axis_names=["i", "j"], vmapped=vmapped
         )
 
         cutoff = 10 * jnp.finfo(jnp.float32).eps
@@ -506,10 +512,8 @@ def test_update_step(mesh, N, num_steps, obj_fns):
     L = 5.0
     grid = grids.Grid((N, N), domain=((0, L), (0, L)), device_mesh=mesh, periods=(L, L))
     velocities, pressure = setup_variables(grid)
-
-    surface_velocity = lambda field, xp, yp: convolution_functions.convolve(
-        field, xp, yp, convolution_functions.gaussian
-    )
+    vconv = jax.vmap(convolution_functions.convolve, in_axes=(None, 0, None))
+    surface_velocity = lambda field, x: vconv(field, x, convolution_functions.gaussian)
 
     def convect(v):
         return tuple(advection.advect_upwind(u, v, dt) for u in v)
@@ -566,7 +570,8 @@ def test_update_step(mesh, N, num_steps, obj_fns):
 @pytest.mark.parametrize("N", [64])
 @pytest.mark.parametrize("inner_steps", [50])
 @pytest.mark.parametrize("outer_steps", [1, 10])
-def test_integration(mesh, N, inner_steps, outer_steps, obj_fn):
+@pytest.mark.parametrize("vmapped", [True, False])
+def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
 
     density = 1.0
     viscosity = 0.05
@@ -600,8 +605,8 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn):
         forcing=None,
     )
 
-    surface_velocity = lambda f, x, y: convolution_functions.mesh_convolve(
-        f, x, y, convolution_functions.gaussian, axis_names=["i", "j"]
+    surface_velocity = lambda f, x: convolution_functions.mesh_convolve(
+        f, x, convolution_functions.gaussian, axis_names=["i", "j"], vmapped=vmapped
     )
 
     evolve = jax.jit(
@@ -619,35 +624,40 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn):
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
             ),
-            out_specs=(P("i", "j"), (P("i", "j"), P("i", "j"))),
+            out_specs=(
+                P("i", "j"),
+                (P("i", "j"), P("i", "j")),
+                (P(None, "i", "j"), (P(None, "i", "j"), P(None, "i", "j")), P()),
+            ),
         ),
-        static_argnums=(4, 5, 6, 7, 8, 9),
+        static_argnums=(4, 5, 6, 7, 8, 9, 10, 11, 12),
     )
-
     ref_time = 0.0
-    p, v = pressure, velocities
-    for step in range(outer_steps):
-        p, v = evolve(
-            p,
-            v,
-            eigvals,
-            ref_time,
-            dt,
-            1,
-            inner_steps,
-            obj_fn,
-            explicit_update,
-            surface_velocity,
-        )
-        ref_time += inner_steps * dt
+    p, v, y = evolve(
+        pressure,
+        velocities,
+        eigvals,
+        ref_time,
+        dt,
+        1,
+        inner_steps,
+        outer_steps,
+        obj_fn,
+        explicit_update,
+        surface_velocity,
+        None,
+        lambda args, y: args,
+    )
 
     def internal_post_processing(all_variables, dt):
         return all_variables
 
-    surf_fn = lambda field, xp, yp: convolution_functions.convolve(
-        field, xp, yp, convolution_functions.gaussian
-    )
+    vconv = jax.vmap(convolution_functions.convolve, in_axes=(None, 0, None))
+    surf_fn = lambda field, x: vconv(field, x, convolution_functions.gaussian)
 
     IBM_forcing = lambda velocities, t, dt: IBM_Force.immersed_boundary_force(
         velocities, [obj_fn], convolution_functions.gaussian, surf_fn, t, dt

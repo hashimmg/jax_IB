@@ -333,17 +333,28 @@ def evolve_navier_stokes_sharded(
         data_processing_int(tuple[GridVariable, tuple[GridVariable, GridVariable],float]) -> Any
         The outpout of this function is accumulated using jax.lax.scan over the inner loop and
         passed into `data_processing_outer` during the outer loop. For `None`, defaults to `lambda *args: None`.
+        The input variables correspond to pressure, tuple of velocity-fields, and elapsed time, respectively.
+        If this function is wrapped with shard_map, out_specs have to match the pytree structure of the return value
+        of `evolve_navier_stokes_sharded`, which may depend on the pytree structure of the return values of
+        `data_processing_inner`.
       data_processing_outer: A function with signature
         data_processing_outer(tuple[GridVariable, tuple[GridVariable, GridVariable],float], Any) -> Any
         The output of the `data_processing_inner` is passed in as the second argument to `data_processing_outer`.
         The outpout of this function is accumulated using jax.lax.scan over the outer loop and returned
         to the caller. For `None`, defaults to `lambda *args: None`.
+        The input variables correspond to pressure, tuple of velocity-fields, and elapsed time, and output
+        variable of `data_processing_inner`, respectively.
+        If this function is wrapped with shard_map, out_specs have to match the pytree structure of the return value
+        of `evolve_navier_stokes_sharded`, which may depend on the pytree structure of the return values of
+        `data_processing_outer` and `data_processing_inner`.
 
     Returns:
       GridVariable: The final pressure
       tuple[GridVariable, GridVariable]: The final velocities
       Any: The accumulated (stacked) output of `data_processing_outer` over the outer loops.
-        For `data_processing_outer=None` equals `None`.
+        For `data_processing_outer=None` equals `None`. The pytree structure of this output
+        may depend on the pytree structure of the return values of `data_processing_inner` and
+        `data_processing_outer`.
 
     """
 
@@ -396,7 +407,6 @@ def evolve_navier_stokes_sharded(
     final_pressure.array.grid = pressure.grid
     final_velocities[0].array.grid = velocities[0].grid
     final_velocities[1].array.grid = velocities[1].grid
-
     # return results
     return final_pressure, final_velocities, y
 
