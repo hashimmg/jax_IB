@@ -54,13 +54,20 @@ def immersed_boundary_force_per_particle(
             * dirac_delta_approx(jnp.sqrt((_x[0] - X) ** 2 + (_x[1] - Y) ** 2), 0, dx)
             * _ds
         )
-        # return F*dirac_delta_approx(xp-X,0,dx)*dirac_delta_approx(yp-Y,0,dy)*dss
-        # return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2
+        # =========  alternative implementations of dirac-delta approximations ======= #
+        #                                                                              #
+        # return F*dirac_delta_approx(xp-X,0,dx)*dirac_delta_approx(yp-Y,0,dy)*dss     #
+        # return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2      #
+        #                                                                              #
+        # ============================================================================ #
 
-    body = lambda step, result: result+calc_force(F[step], x[step], dS[step])
+    def body(step, args):
+        result, (F, _x, _ds) = args
+        return result + calc_force(F[step], _x[step], _ds[step])
+
     init = (
         jnp.zeros((2, *X.shape), X.dtype),
-        (jnp.expand_dims(force, axis=(2, 3))),
+        (jnp.expand_dims(force, axis=(2, 3)), x, dS),
     )
     res, _ = jax.lax.fori_loop(0, x.shape[0], body, init)
 
