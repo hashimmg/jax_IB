@@ -63,7 +63,7 @@ def immersed_boundary_force_per_particle(
 
     def body(step, args):
         result, (F, _x, _ds) = args
-        return result + calc_force(F[step], _x[step], _ds[step])
+        return result + calc_force(F[step], _x[step], _ds[step]), (F, _x, _ds)
 
     init = (
         jnp.zeros((2, *X.shape), X.dtype),
