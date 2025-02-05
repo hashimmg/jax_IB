@@ -605,9 +605,6 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
         forcing=None,
     )
 
-    surface_velocity = lambda f, x: convolution_functions.mesh_convolve(
-        f, x, convolution_functions.gaussian, axis_names=["i", "j"], vmapped=vmapped
-    )
 
     evolve = jax.jit(
         shard_map(
@@ -648,7 +645,7 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
         outer_steps,
         obj_fn,
         explicit_update,
-        surface_velocity,
+        ('i','j'),
         None,
         lambda args, y: args,
     )
