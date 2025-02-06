@@ -3,8 +3,10 @@ import jax
 from jax_ib.base import grids
 from jax_ib.base.grids import GridVariable, GridArrayVector, GridArray
 from jax_ib.base.particle_class import Particle
+from jax_ib.base.config import checkpoint
+from functools import partial
 
-
+@partial(checkpoint, static_argnums = (1,2,3))
 def immersed_boundary_force_per_particle(
     velocity_field: tuple[GridVariable, GridVariable],
     obj_fn: callable,
@@ -61,6 +63,7 @@ def immersed_boundary_force_per_particle(
         #                                                                              #
         # ============================================================================ #
 
+    @checkpoint
     def body(step, args):
         result, (F, _x, _ds) = args
         return result + calc_force(F[step], _x[step], _ds[step]), (F, _x, _ds)

@@ -372,7 +372,7 @@ def evolve_navier_stokes_sharded(
         dt,
         width,
         obj_fn,
-        explicit_update_fn,
+        checkpoint(explicit_update_fn),
         axis_names,
     )
 
