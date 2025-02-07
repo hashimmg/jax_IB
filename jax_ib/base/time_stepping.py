@@ -219,7 +219,7 @@ def get_step_fn_sharded(
     width: int,
     obj_fn: callable,
     explicit_update_fn: callable,
-    surface_velocity_fn: callable,
+    axis_names: tuple[str],
 ) -> callable:
     """
     Return the function that performes an update step of pressure and velocity
@@ -247,6 +247,10 @@ def get_step_fn_sharded(
     eigvals = jnp.add.outer(laplacian_eigenvalues[0], laplacian_eigenvalues[1].T)
     pinv = fast_diagonalization.pseudo_poisson_inversion(
         eigvals, jnp.complex128, ("i", "j"), cutoff
+    )
+
+    surface_velocity_fn = lambda f, x: convolution_functions.mesh_convolve(
+        f, x, convolution_functions.gaussian, axis_names=axis_names, vmapped=False
     )
 
     def step_fn(
@@ -303,7 +307,7 @@ def evolve_navier_stokes_sharded(
     outer_steps,
     obj_fn,
     explicit_update_fn,
-    surface_velocity_fn,
+    axis_names,
     data_processing_inner=None,
     data_processing_outer=None,
 ):
@@ -326,9 +330,7 @@ def evolve_navier_stokes_sharded(
       explicit_update_fn: A callable with signature
         `explicit_update_fn(tuple[GridVariable, GridVariable]) -> tuple[GridVariable, GridVariable]`.
         Computes the local update of velocities coresponding to advection, diffusion and force-terms.
-      surace_velocity_fn: A callable with signature
-        `surface_velocity_fn(field:GridVariable, x:jax.Array, y:jax.Array) -> jax.Array`.
-        Computes the values of its input `field` at the positions `x,y`.
+      axis_names: the names of the pmappe axes
       data_processing_inner: A function with signature
         data_processing_int(tuple[GridVariable, tuple[GridVariable, GridVariable],float]) -> Any
         The outpout of this function is accumulated using jax.lax.scan over the inner loop and
@@ -370,7 +372,7 @@ def evolve_navier_stokes_sharded(
         width,
         obj_fn,
         explicit_update_fn,
-        surface_velocity_fn,
+        axis_names,
     )
 
     i = jax.lax.axis_index("i")

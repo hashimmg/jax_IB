@@ -70,7 +70,6 @@ def immersed_boundary_force_per_particle(
         (jnp.expand_dims(force, axis=(2, 3)), x, dS),
     )
     res, _ = jax.lax.fori_loop(0, x.shape[0], body, init)
-
     return res
 
 
