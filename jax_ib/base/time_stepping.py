@@ -253,6 +253,7 @@ def get_step_fn_sharded(
     surface_velocity_fn = lambda f, x: convolution_functions.mesh_convolve(
         f, x, convolution_functions.gaussian, axis_names=axis_names, vmapped=False
     )
+
     @checkpoint
     def step_fn(
         args: tuple[GridVariable, tuple[GridVariable, GridVariable], float],
@@ -287,6 +288,7 @@ def get_step_fn_sharded(
 
         us[0].array.data += dt * temp[0].data
         us[1].array.data += dt * temp[1].data
+
         del temp
         local_u_projected, local_pressure = prs.projection_and_update_pressure_sharded(
             p, us, pinv, width
@@ -372,7 +374,7 @@ def evolve_navier_stokes_sharded(
         dt,
         width,
         obj_fn,
-        checkpoint(explicit_update_fn),
+        explicit_update_fn,
         axis_names,
     )
 

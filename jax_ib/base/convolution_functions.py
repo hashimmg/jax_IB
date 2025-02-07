@@ -3,10 +3,8 @@ import jax.numpy as jnp
 from functools import partial
 import pdb
 from jax_ib.base.grids import GridVariable
-from jax_ib.base.config import checkpoint
 
 
-@checkpoint
 def gaussian(x: jax.Array, mu: jax.Array, sigma: jax.Array) -> float:
     """
     A standard gaussian. Used to approximate delta functions.
@@ -54,7 +52,6 @@ def mesh_convolve(
         jax.lax.psum(local_conv, axis_name=axis_names[0]), axis_name=axis_names[1]
     )
 
-@partial(checkpoint, static_argnums = 2)
 def _sequential_conv(
     field: GridVariable, x: jax.Array, dirac_delta_approx: callable
 ) -> jax.Array:
@@ -68,7 +65,6 @@ def _sequential_conv(
 
 
 # TODO: the dirac delta function should be removed as input
-@partial(checkpoint, static_argnums = 2)
 def convolve(
     field: GridVariable, x: jax.Array, dirac_delta_approx: callable
 ) -> jax.Array:
