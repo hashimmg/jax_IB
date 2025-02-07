@@ -22,17 +22,16 @@ def gaussian(x: jax.Array, mu: jax.Array, sigma: jax.Array) -> float:
 def mesh_convolve(
     field: GridVariable,
     x: jax.Array,
-    y: jax.Array,
     dirac_delta_approx: callable,
     axis_names: list[str],
+    vmapped: bool = False,
 ) -> jax.Array:
     """
     Compute the convolution of sharded array `field` with 2d-dirac-delta functions located at `x, y`.
-    The convolution is computed for each pair `x[i], y[i]` in parallel.
 
     Args:
       field: GridVariable of the field
-      x, y: locations of the dirac-delta peaks
+      x: 2-d locations of the dirac-delta peaks, shape (2, N)
       dirac_delta_approx: Function approximating a dirac-delta function in 1d.
         Expected function signature is `dirac_delta_approx(x, X, dx)`, with
         `x` a float, `X` a `jax.Array` of shape `field.data.shape`, and `dx`
@@ -42,36 +41,51 @@ def mesh_convolve(
     Returns:
       jax.Array: the convolution result.
     """
-    local_conv = convolve(field, x, y, dirac_delta_approx)
+    if vmapped:
+        conv = jax.vmap(convolve, in_axes=(None, 0, None))
+    else:
+        conv = _sequential_conv
+
+    local_conv = conv(field, x, dirac_delta_approx)
     return jax.lax.psum(
         jax.lax.psum(local_conv, axis_name=axis_names[0]), axis_name=axis_names[1]
     )
 
 
+def _sequential_conv(
+    field: GridVariable, x: jax.Array, dirac_delta_approx: callable
+) -> jax.Array:
+
+    def body(carry, _x):
+        y = jnp.sum(convolve(carry, _x, dirac_delta_approx))
+        return carry, y
+
+    _, result = jax.lax.scan(f=body, init=field, xs=x)
+    return result
+
+
 # TODO: the dirac delta function should be removed as input
-@jax.tree_util.Partial(jax.vmap, in_axes=(None, 0, 0, None))
 def convolve(
-    field: GridVariable, xp: float, yp: float, dirac_delta_approx: callable
+    field: GridVariable, x: jax.Array, dirac_delta_approx: callable
 ) -> jax.Array:
     """
     Computes the 2-d convolution of the data in `fields.data` with a
     discrete approximation of the delta function. I.e. for a grid (i,j)
-    with grid-points (x[i], y[j]), a 2d function data[i,j], and two points xp and yp,
+    with grid-points (_x[i], _y[j]), a 2d function data[i,j], and a 2d point points `x`
     it computes
 
-    `sum_{i,j} data[i,j] delta(x[i]-xp) delta(y[j]-yp)  dx  dy)`
+    `sum_{i,j} data[i,j] delta(_x[i]-x[0]) delta(_y[j]-x[1])  dx  dy)`
 
-    The point xp, yp does not have to be a grid point.
+    The point `x` does not have to be a grid point.
     The delta function requires the following signature:
-    dirac_delta_approx(xp, X, dx)
-    dirac_delta_approx(yp, Y, dy)
+    dirac_delta_approx(x[0], X, dx)
+    dirac_delta_approx(x[1], Y, dy)
 
     with X, Y = grid.mesh() a mesh of the 2d grid, and dx, dx the grid spacing.
 
     Args:
       field: GridVariable whose data `field.data` to convolve as described above
-      xp: x-value of the space-point of the surface of the object
-      yp: y-value of the space-point of the surface of the object
+      x: (x,y)-values of the space-points of the surface of the object
       dirac_delta_approx: callable approximating a dirac-delta function
 
     Returns:
@@ -84,8 +98,8 @@ def convolve(
     dy = grid.step[1]
     return jnp.sum(
         field.data
-        * dirac_delta_approx(xp, X, dx)
-        * dirac_delta_approx(yp, Y, dy)
+        * dirac_delta_approx(x[0], X, dx)
+        * dirac_delta_approx(x[1], Y, dy)
         * dx
         * dy
     )

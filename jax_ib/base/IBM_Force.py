@@ -38,33 +38,40 @@ def immersed_boundary_force_per_particle(
     X, Y = ux.grid.mesh(ux.offset)  # 2d is hard coded right now
     dx = ux.grid.step[0]
 
-    xp, yp = obj_fn(t)
-    UPx, UPy = jax.jacfwd(obj_fn)(t)
+    x = obj_fn(t)
+    UP = jax.jacfwd(obj_fn)(t)
 
-    ux_at_surface = surface_velocity(ux, xp, yp)
-    uy_at_surface = surface_velocity(uy, xp, yp)
+    u_at_surface = jnp.stack([surface_velocity(u, x) for u in velocity_field], axis=1)
 
-    forcex = (UPx - ux_at_surface) / dt
-    forcey = (UPy - uy_at_surface) / dt
+    force = (UP - u_at_surface) / dt
 
-    x_i = jnp.roll(xp, -1)
-    y_i = jnp.roll(yp, -1)
-    dxL = x_i - xp
-    dyL = y_i - yp
-    dS = jnp.sqrt(dxL**2 + dyL**2)
+    _dx = jnp.roll(x, -1, axis=0) - x
+    dS = jnp.sqrt(jnp.sum(_dx**2, axis=1))
 
-    def calc_force(F, xp, yp, dss):
+    def calc_force(_F, _x, _ds):
         return (
-            F * dirac_delta_approx(jnp.sqrt((xp - X) ** 2 + (yp - Y) ** 2), 0, dx) * dss
+            _F
+            * dirac_delta_approx(jnp.sqrt((_x[0] - X) ** 2 + (_x[1] - Y) ** 2), 0, dx)
+            * _ds
         )
-        # return F*dirac_delta_approx(xp-X,0,dx)*dirac_delta_approx(yp-Y,0,dy)*dss
-        # return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2
+        # =========  alternative implementations of dirac-delta approximations ======= #
+        #                                                                              #
+        # return F*dirac_delta_approx(xp-X,0,dx)*dirac_delta_approx(yp-Y,0,dy)*dss     #
+        # return F*dirac_delta_approx(xp,X,dx)*dirac_delta_approx(yp,Y,dy)*dss**2      #
+        #                                                                              #
+        # ============================================================================ #
 
-    vmapped_calc_force = jax.vmap(calc_force, in_axes=0)
-    # TODO (mganahl): the two vmap calls can be done in parallel
-    return jnp.sum(vmapped_calc_force(forcex, xp, yp, dS), axis=0), jnp.sum(
-        vmapped_calc_force(forcey, xp, yp, dS), axis=0
+    def body(step, args):
+        result, (F, _x, _ds) = args
+        return result + calc_force(F[step], _x[step], _ds[step]), (F, _x, _ds)
+
+    init = (
+        jnp.zeros((2, *X.shape), X.dtype),
+        (jnp.expand_dims(force, axis=(2, 3)), x, dS),
     )
+    res, _ = jax.lax.fori_loop(0, x.shape[0], body, init)
+
+    return res
 
 
 # mganahl: this function is strictly speaking not needed. Multiple particles can be handeled
