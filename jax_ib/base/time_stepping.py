@@ -15,6 +15,7 @@ from jax_ib.base import (
 )
 from jax_cfd.base import time_stepping
 from jax_ib.base import particle_class
+from jax_ib.base.config import checkpoint
 
 
 PyTreeState = TypeVar("PyTreeState")
@@ -253,6 +254,7 @@ def get_step_fn_sharded(
         f, x, convolution_functions.gaussian, axis_names=axis_names, vmapped=False
     )
 
+    @checkpoint
     def step_fn(
         args: tuple[GridVariable, tuple[GridVariable, GridVariable], float],
     ) -> tuple[GridVariable, tuple[GridVariable, GridVariable], float]:
@@ -286,11 +288,14 @@ def get_step_fn_sharded(
 
         us[0].array.data += dt * temp[0].data
         us[1].array.data += dt * temp[1].data
+
         del temp
         local_u_projected, local_pressure = prs.projection_and_update_pressure_sharded(
             p, us, pinv, width
         )
-
+        local_pressure.array.grid = p.grid
+        local_u_projected[0].array.grid = us[0].grid
+        local_u_projected[1].array.grid = us[1].grid
         return local_pressure, local_u_projected, t + dt
 
     return step_fn
@@ -382,21 +387,19 @@ def evolve_navier_stokes_sharded(
     local_pressure = pressure.to_subgrid((i, j))
     local_velocities = tuple([u.to_subgrid((i, j)) for u in velocities])
 
-    # inner loop running over `inner_steps`
-    # def inner(args):
-    #     return jax.lax.fori_loop(
-    #         0, inner_steps, lambda n, args_2: step_fun(args_2), args
-    #     )
-
+    @checkpoint
     def _step_fun(carry, x):
         result = step_fun(carry)
         return result, data_processing_inner(result)
 
+    # inner loop running over `inner_steps`
+    @checkpoint
     def inner(args):
         carry, y = jax.lax.scan(_step_fun, args, xs=None, length=inner_steps)
         return carry, y
 
     # outer loop running over `outer_steps`
+    @checkpoint
     def outer(carry, x):
         result, y = inner(carry)
         return result, data_processing_outer(result, y)
