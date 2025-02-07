@@ -1,4 +1,6 @@
 import os
+import wandb
+
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax
@@ -23,14 +25,97 @@ from jax.sharding import PartitionSpec as P, NamedSharding, Mesh
 from functools import partial
 from jax.experimental.shard_map import shard_map
 
+import optax
 import jaxopt
 from jaxopt import ProjectedGradient
 from jaxopt.projection import projection_box
 
 import numpy as np
 import pickle
+import jsonargparse as argparse
 
 GridVariable = grids.GridVariable
+
+
+def get_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Example script for CFD optimization")
+    parser.add_argument(
+        "--config",
+        action=argparse.ActionConfigFile,
+        help="Read arguments in from a yaml file. All arguments passed on the "
+        "command line before the config file are overridden with values from "
+        "config file (if present in config). All arguments passed after "
+        "config file will override any values in config file "
+        "(if present in config file).",
+    )
+
+    parser.add_argument(
+        "--outer-steps",
+        type=int,
+        default=10,
+    )
+
+    parser.add_argument(
+        "--inner-steps",
+        type=int,
+        default=10,
+    )
+
+    parser.add_argument(
+        "--L1",
+        type=float,
+        default=30.0,
+    )
+
+    parser.add_argument(
+        "--L2",
+        type=float,
+        default=10.0,
+    )
+
+    parser.add_argument(
+        "--N1",
+        type=int,
+        default=128,
+    )
+
+    parser.add_argument(
+        "--N2",
+        type=int,
+        default=128,
+    )
+
+    parser.add_argument(
+        "--opt-type",
+        type=str,
+        default="optax",
+    )
+
+    parser.add_argument(
+        "--maxiter",
+        type=int,
+        default=100,
+    )
+
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-1,
+    )
+
+    parser.add_argument(
+        "--dt",
+        type=float,
+        default=4e-5,
+    )
+
+    parser.add_argument(
+        "--viscosity",
+        type=float,
+        default=0.003,
+    )
+
+    return parser
 
 
 def ellipse(geometry_params, ntheta=200):
@@ -118,7 +203,9 @@ def main(
     inner_steps: int = 10,
     outer_steps: int = 10,
     npoints: int = 100,
-    optimize: bool = False,
+    opt_type: str = "optax",
+    learning_rate: float = 1e-1,
+    maxiter: int = 100,
 ):
     """
     Run an example parameter optimization.
@@ -135,8 +222,8 @@ def main(
       ref_time: Reference time
       inner_steps: Inner time steps
       outer_steps: Outer time steps
-      optimize: If or if not to run optimization. If False only returns the value
-        of the loss at the initial parameter values.
+      opt_type: which opt_type to use, either optax or jaxopt.
+        if neither, the loss at the initial parameter values is returned.
 
     Returns:
       Any: The loss, or the optimal parameters
@@ -332,9 +419,6 @@ def main(
         # vs total energy of lifting and rotating the object (ellipse).
         return jnp.sum(y[0]) / jnp.sum(y[1])
 
-    # jitted gradient of loss, returns both value of the objective as well as gradient values
-    jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
-
     n_a = 20
     n_b = 20
     m_a = 20
@@ -342,7 +426,6 @@ def main(
     A0 = 2.0
     frequency = 1.0
     initial_motion_params = initialize_params(A0, frequency, n_a, n_b, m_a, m_b)
-
     # lower and upper bounds of parameters
     lower = (
         np.concatenate([[0.25], np.full(n_a - 1, -0.8)]),
@@ -358,26 +441,65 @@ def main(
         np.full(m_b, jnp.pi / 4),
         jnp.pi / 2,
     )
-    if optimize:
-        # optimize loss with jaxopt
-        solver = ProjectedGradient(jgradloss, projection_box, value_and_grad=True)
+
+    def to_log(params):
+        logs = {}
+        K = 0
+        for p in params:
+            if hasattr(p, "__iter__") and len(p.shape) > 0:
+                logs.update({f"param-{i+K}": o for i, o in enumerate(p)})
+                K += len(p)
+            else:
+                logs.update({f"param-{K}": p})
+                K += 1
+        return logs
+
+    if opt_type.lower() == "optax":
+        jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
+        optimizer = optax.adam(learning_rate)
+        params = initial_motion_params
+        opt_state = optimizer.init(params)
+        for n in range(maxiter):
+            value, grads = jgradloss(params)
+            logs = to_log(params)
+            logs.update({"objective": value})
+            wandb.log(logs, step=n)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            print(n, value)
+
+        return params
+
+    elif opt_type.lower() == "jaxopt":
+        jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
+        solver = ProjectedGradient(
+            jgradloss, projection_box, value_and_grad=True, maxiter=maxiter
+        )
         return solver.run(initial_motion_params, hyperparams_proj=(lower, upper)).params
+
     return jgradloss(initial_motion_params)
 
 
 if __name__ == "__main__":
+    wandb.init()
+    parser = get_parser()
+    args = parser.parse_args()
+
     mesh = jax.make_mesh(axis_shapes=(4, 2), axis_names=("i", "j"))
 
     density = 1.0
-    viscosity = 0.003
-    dt = 4e-5
-    L1, L2 = 30, 10
-    N1, N2 = 1400, 400
+    viscosity = args.viscosity
+    dt = args.dt
+    L1, L2 = args.L1, args.L2
+    N1, N2 = args.N1, args.N2
+
     ref_time = 0.0  # the initial time of the simulation
-    inner_steps = 10  # steps of the inner loop
-    outer_steps = 500  # steps of the outer loop
-    optimize = True
+    inner_steps = args.outer_steps  # steps of the inner loop
+    outer_steps = args.inner_steps  # steps of the outer loop
+    opt_type = args.opt_type
     npoints = 100
+    learning_rate = args.learning_rate
+    maxiter = args.maxiter
     optimal_params = main(
         mesh,
         density,
@@ -391,7 +513,9 @@ if __name__ == "__main__":
         inner_steps,
         outer_steps,
         npoints,
-        optimize,
+        opt_type,
+        learning_rate,
+        maxiter,
     )
     with open("optimal-params.pkl", "wb") as f:
         pickle.dump(optimal_params, f)
