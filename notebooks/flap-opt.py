@@ -70,10 +70,10 @@ def to_motion_params(alpha_com, beta_com, alpha_rot, beta_rot, phi_rot):
 
 
 def ellipse_trajectory(
-    ellipse_parameters, initial_center_of_mass_position, motion_params, t
+    ellipse_parameters, initial_center_of_mass_position, motion_params, npoints, t
 ):
     com_params, rot_params = to_motion_params(*motion_params)
-    x, y = ellipse(ellipse_parameters, 200)
+    x, y = ellipse(ellipse_parameters, npoints)
     center_of_mass = initial_center_of_mass_position + com_motion(com_params, t)
     angular_rotation_speed = com_rotation(rot_params, t)
     xp = (
@@ -85,20 +85,6 @@ def ellipse_trajectory(
         x * jnp.sin(angular_rotation_speed * t)
         + y * jnp.cos(angular_rotation_speed * t)
         + center_of_mass[1]
-    )
-    return jnp.stack([xp, yp], axis=1)
-
-
-def ellipse_trajectory_simple(ellipse_parameters, npoints, t):
-    x, y = ellipse(ellipse_parameters, npoints)
-    angular_rotation_speed = 2 * jnp.pi + jnp.cos(
-        2.0 * jnp.pi * t
-    ) * convolution_functions.gaussian(t, 2 * jnp.pi, 1)
-    xp = x * jnp.cos(angular_rotation_speed * t) - y * jnp.sin(
-        angular_rotation_speed * t
-    )
-    yp = x * jnp.sin(angular_rotation_speed * t) + y * jnp.cos(
-        angular_rotation_speed * t
     )
     return jnp.stack([xp, yp], axis=1)
 
@@ -131,6 +117,7 @@ def main(
     ref_time: float = 0.0,
     inner_steps: int = 10,
     outer_steps: int = 10,
+    npoints: int = 100,
     optimize: bool = False,
 ):
     """
@@ -240,7 +227,7 @@ def main(
         # ellipse_position(t) returns the surface points of the ellipse
         # at time t
         ellipse_position = partial(
-            ellipse_trajectory, *[ellipse_params, initial_com, params]
+            ellipse_trajectory, *[ellipse_params, initial_com, params, npoints]
         )
         d_ellipse_position = jax.jacfwd(ellipse_position)
 
@@ -390,6 +377,7 @@ if __name__ == "__main__":
     inner_steps = 10  # steps of the inner loop
     outer_steps = 500  # steps of the outer loop
     optimize = True
+    npoints = 100
     optimal_params = main(
         mesh,
         density,
@@ -402,6 +390,7 @@ if __name__ == "__main__":
         ref_time,
         inner_steps,
         outer_steps,
+        npoints,
         optimize,
     )
     with open("optimal-params.pkl", "wb") as f:
