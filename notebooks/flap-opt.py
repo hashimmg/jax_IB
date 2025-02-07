@@ -44,7 +44,6 @@ def ellipse(geometry_params, ntheta=200):
 
 
 def initialize_params(A0, frequency, n_a, n_b, m_a, m_b):
-    n_b = 20
     alpha_com = jnp.zeros(n_a).at[0].set(0.8)
     beta_com = jnp.zeros(n_b)
     alpha_rot = jnp.zeros(n_a).at[0].set(jnp.pi / 4.0)
@@ -388,9 +387,9 @@ if __name__ == "__main__":
     L1, L2 = 30, 10
     N1, N2 = 1400, 400
     ref_time = 0.0  # the initial time of the simulation
-    inner_steps = 2  # steps of the inner loop
-    outer_steps = 2  # steps of the outer loop
-    optimize = False
+    inner_steps = 10  # steps of the inner loop
+    outer_steps = 500  # steps of the outer loop
+    optimize = True
     optimal_params = main(
         mesh,
         density,
