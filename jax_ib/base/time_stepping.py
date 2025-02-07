@@ -293,7 +293,9 @@ def get_step_fn_sharded(
         local_u_projected, local_pressure = prs.projection_and_update_pressure_sharded(
             p, us, pinv, width
         )
-
+        local_pressure.array.grid = p.grid
+        local_u_projected[0].array.grid = us[0].grid
+        local_u_projected[1].array.grid = us[1].grid
         return local_pressure, local_u_projected, t + dt
 
     return step_fn
