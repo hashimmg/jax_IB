@@ -240,12 +240,12 @@ class GridArray(np.lib.mixins.NDArrayOperatorsMixin):
             shape = (self.shape[0] - 2 * width, self.shape[1] - 2 * width)
             domain = (
                 (
-                    self.grid.domain[0][0] - width * self.grid.step[0],
-                    self.grid.domain[0][1] + width * self.grid.step[0],
+                    self.grid.domain[0][0] + width * self.grid.step[0],
+                    self.grid.domain[0][1] - width * self.grid.step[0],
                 ),
                 (
-                    self.grid.domain[1][0] - width * self.grid.step[1],
-                    self.grid.domain[1][1] + width * self.grid.step[1],
+                    self.grid.domain[1][0] + width * self.grid.step[1],
+                    self.grid.domain[1][1] - width * self.grid.step[1],
                 ),
             )
             grid = Grid(
