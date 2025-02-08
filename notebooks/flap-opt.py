@@ -336,7 +336,7 @@ def main(
         # the power required for the rotation
         rotation_power = jax.grad(rotation_energy)
 
-        #################    alternative loss function, uncomment if you wantto use it ##################
+        #################    alternative loss function, uncomment if you want to use it ##################
         # def compute_drag_v1(args, _):
         #     pressure, velocities, time = args
 
@@ -354,7 +354,7 @@ def main(
         #     )
         ################################################################################################
 
-        # teh following function is used to compute the final loss function, i.e. the ratio of
+        # the following function is used to compute the final loss function, i.e. the ratio of
         # energy required to move in x direction vs the energy required for lifting and rotating the ellipse.
         def compute_drag(
             args: tuple[GridVariable, tuple[GridVariable, GridVariable], float], _
