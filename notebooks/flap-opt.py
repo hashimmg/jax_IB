@@ -341,7 +341,6 @@ def main(
         #     pressure, velocities, time = args
 
         #     x = ellipse_position(time)
-        #     UP = d_ellipse_position(time)
         #     u_at_surface = jnp.stack(
         #         [surface_velocity(u, x) for u in velocities], axis=1
         #     )
@@ -358,7 +357,7 @@ def main(
         # teh following function is used to compute the final loss function, i.e. the ratio of
         # energy required to move in x direction vs the energy required for lifting and rotating the ellipse.
         def compute_drag(
-            args: tuple[GridVariable, tuple[GridVariable, GridVariable]], _
+            args: tuple[GridVariable, tuple[GridVariable, GridVariable]. float], _
         ) -> tuple[jax.Array, jax.Array]:
             """
             Computes the required power for moving in x-direction,
@@ -371,7 +370,6 @@ def main(
             """
             pressure, velocities, time = args
             x = ellipse_position(time)
-            UP = d_ellipse_position(time)
             u_at_surface = jnp.stack(
                 [surface_velocity(u, x) for u in velocities], axis=1
             )
