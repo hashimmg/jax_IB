@@ -1,6 +1,6 @@
 import os
 import wandb
-
+wandb.init(project = 'aramco-jax-cfd')
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax
@@ -481,7 +481,7 @@ def main(
 
 
 if __name__ == "__main__":
-    wandb.init()
+
     parser = get_parser()
     args = parser.parse_args()
 
