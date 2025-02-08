@@ -357,7 +357,7 @@ def main(
         # teh following function is used to compute the final loss function, i.e. the ratio of
         # energy required to move in x direction vs the energy required for lifting and rotating the ellipse.
         def compute_drag(
-            args: tuple[GridVariable, tuple[GridVariable, GridVariable]. float], _
+            args: tuple[GridVariable, tuple[GridVariable, GridVariable], float], _
         ) -> tuple[jax.Array, jax.Array]:
             """
             Computes the required power for moving in x-direction,
