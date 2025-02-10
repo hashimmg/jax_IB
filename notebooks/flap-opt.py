@@ -1,5 +1,5 @@
 import os
-#import wandb
+import wandb
 
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -53,36 +53,42 @@ def get_parser() -> argparse.ArgumentParser:
         "--outer-steps",
         type=int,
         default=10,
+        help="Number of outer evolution steps",
     )
 
     parser.add_argument(
         "--inner-steps",
         type=int,
         default=10,
+        help="Number of inner evolution steps",
     )
 
     parser.add_argument(
         "--L1",
         type=float,
         default=30.0,
+        help="Extension of the spatial domain in x direction",
     )
 
     parser.add_argument(
         "--L2",
         type=float,
         default=10.0,
+        help="Extension of the spatial domain in x direction",
     )
 
     parser.add_argument(
         "--N1",
         type=int,
         default=128,
+        help="Gridshape in x direction",
     )
 
     parser.add_argument(
         "--N2",
         type=int,
         default=128,
+        help="Gridshape in y direction",
     )
 
     parser.add_argument(
@@ -113,6 +119,11 @@ def get_parser() -> argparse.ArgumentParser:
         "--viscosity",
         type=float,
         default=0.003,
+    )
+    parser.add_argument(
+        "--M",
+        type=int,
+        default=2,
     )
 
     return parser
@@ -197,6 +208,7 @@ def main(
     outer_steps: int = 10,
     npoints: int = 100,
     opt_type: str = "optax",
+    M: int = 4,
     learning_rate: float = 1e-1,
     maxiter: int = 100,
 ):
@@ -312,10 +324,6 @@ def main(
         )
         d_ellipse_position = jax.jacfwd(ellipse_position)
 
-        force_fn = lambda v, t: IBM_Force.immersed_boundary_force_per_particle(
-            v, ellipse_position, convolution_functions.gaussian, surface_velocity, t, dt
-        )
-
         def com_coords(t: float):
             """Compute the center-of-mass coordinates  of the ellipse surface points"""
             x = ellipse_position(t)
@@ -330,28 +338,11 @@ def main(
         # the power required for the rotation
         rotation_power = jax.grad(rotation_energy)
 
-        #################    alternative loss function, uncomment if you want to use it ##################
-        # def compute_drag_v1(args, _):
-        #     pressure, velocities, time = args
-
-        #     x = ellipse_position(time)
-        #     u_at_surface = jnp.stack(
-        #         [surface_velocity(u, x) for u in velocities], axis=1
-        #     )
-        #     force = jnp.sum((UP - u_at_surface), axis=0) / dt
-        #     fx, fy = force[0] * pressure.grid.step[0], force[1] * pressure.grid.step[1]
-        #     Ux, Uy = jnp.mean(d_ellipse_position(time), axis=0)
-
-        #     return (
-        #         fx * Ux * dt * inner_steps,
-        #         (fy * Uy + rotation_power(time)) * dt * inner_steps,
-        #     )
-        ################################################################################################
 
         # the following function is used to compute the final loss function, i.e. the ratio of
         # energy required to move in x direction vs the energy required for lifting and rotating the ellipse.
         def compute_drag(
-            args: tuple[GridVariable, tuple[GridVariable, GridVariable], float], _
+            args: tuple[GridVariable, tuple[GridVariable, GridVariable], tuple[GridVariable, GridVariable], float], _
         ) -> tuple[jax.Array, jax.Array]:
             """
             Computes the required power for moving in x-direction,
@@ -362,12 +353,8 @@ def main(
             lifting and rotating the ellipse.
 
             """
-            pressure, velocities, time = args
+            pressure, _, force, time = args
             x = ellipse_position(time)
-            u_at_surface = jnp.stack(
-                [surface_velocity(u, x) for u in velocities], axis=1
-            )
-            force = force_fn(velocities, t=time)
             delta = pressure.grid.step
             fx, fy = tuple(
                 [
@@ -411,25 +398,22 @@ def main(
         # vs total energy of lifting and rotating the object (ellipse).
         return jnp.sum(y[0]) / jnp.sum(y[1])
 
-    n_a = 20
-    n_b = 20
-    m_a = 20
-    m_b = 20
 
-    initial_motion_params = initialize_params(n_a, n_b, m_a, m_b)
+    initial_motion_params = initialize_params(M, M,M,M)
     # lower and upper bounds of parameters
+
     lower = (
-        np.concatenate([[0.25], np.full(n_a - 1, -0.8)]),
-        np.full(n_b, -0.8),
-        np.full(m_a, -jnp.pi / 4),
-        np.full(m_b, -jnp.pi / 4),
+        np.concatenate([[0.25], np.full(M - 1, -0.8)]),
+        np.full(M, -0.8),
+        np.full(M, -jnp.pi / 4),
+        np.full(M, -jnp.pi / 4),
         -jnp.pi / 2,
     )
     upper = (
-        np.full(n_a, 0.8),
-        np.full(n_b, 0.8),
-        np.full(m_a, jnp.pi / 4),
-        np.full(m_b, jnp.pi / 4),
+        np.full(M, 0.8),
+        np.full(M, 0.8),
+        np.full(M, jnp.pi / 4),
+        np.full(M, jnp.pi / 4),
         jnp.pi / 2,
     )
 
@@ -454,7 +438,7 @@ def main(
             value, grads = jgradloss(params)
             logs = to_log(params)
             logs.update({"objective": value})
-            #wandb.log(logs, step=n)
+            wandb.log(logs, step=n)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
             print(n, value)
@@ -475,40 +459,28 @@ if __name__ == "__main__":
 
     parser = get_parser()
     args = parser.parse_args()
-
+    parser.save(args, 'config.yml', overwrite=True)
     mesh = jax.make_mesh(axis_shapes=(4, 2), axis_names=("i", "j"))
 
-    density = 1.0
-    viscosity = args.viscosity
-    dt = args.dt
-    L1, L2 = args.L1, args.L2
-    N1, N2 = args.N1, args.N2
-
-    ref_time = 0.0  # the initial time of the simulation
-    inner_steps = args.outer_steps  # steps of the inner loop
-    outer_steps = args.inner_steps  # steps of the outer loop
-    opt_type = args.opt_type
-    npoints = 100
-    learning_rate = args.learning_rate
-    maxiter = args.maxiter
-    #wandb.init(project = 'aramco-jax-cfd')
+    wandb.init(project = 'aramco-jax-cfd')
     optimal_params = main(
-        mesh,
-        density,
-        viscosity,
-        -2.0,
-        dt,
-        L1,
-        L2,
-        N1,
-        N2,
-        ref_time,
-        inner_steps,
-        outer_steps,
-        npoints,
-        opt_type,
-        learning_rate,
-        maxiter,
+        mesh=mesh,
+        density=1.0,
+        viscosity=args.viscosity,
+        ux=-2.0,
+        dt=args.dt,
+        L1=args.L1,
+        L2=args.L2,
+        N1=args.N1,
+        N2=args.N2,
+        ref_time=0.0,
+        inner_steps=args.inner_steps,
+        outer_steps=args.outer_steps,
+        npoints=100,
+        opt_type=args.opt_type,
+        M=args.M,
+        learning_rate=args.learning_rate,
+        maxiter=args.maxiter,
     )
     with open("optimal-params.pkl", "wb") as f:
         pickle.dump(optimal_params, f)

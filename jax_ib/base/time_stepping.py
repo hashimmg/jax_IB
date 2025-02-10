@@ -16,7 +16,7 @@ from jax_ib.base import (
 from jax_cfd.base import time_stepping
 from jax_ib.base import particle_class
 from jax_ib.base.config import checkpoint
-
+from typing import Optional
 
 PyTreeState = TypeVar("PyTreeState")
 TimeStepFn = Callable[[PyTreeState], PyTreeState]
@@ -259,7 +259,7 @@ def get_step_fn_sharded(
         args: tuple[GridVariable, tuple[GridVariable, GridVariable], float],
     ) -> tuple[GridVariable, tuple[GridVariable, GridVariable], float]:
         """single  update step"""
-        p, us, t = args
+        p, us, _, t = args
 
         local_velocities = tuple([u.shard_pad(width) for u in us])
         temp = tuple([v.crop(width) for v in explicit_update_fn(local_velocities)])
@@ -282,39 +282,39 @@ def get_step_fn_sharded(
         us[0].array.data -= dt * temp[0].data
         us[1].array.data -= dt * temp[1].data
 
-        temp = IBM_Force.immersed_boundary_force(
+        force = IBM_Force.immersed_boundary_force(
             us, [obj_fn], convolution_functions.gaussian, surface_velocity_fn, t, dt
         )
 
-        us[0].array.data += dt * temp[0].data
-        us[1].array.data += dt * temp[1].data
+        us[0].array.data += dt * force[0].data
+        us[1].array.data += dt * force[1].data
 
-        del temp
         local_u_projected, local_pressure = prs.projection_and_update_pressure_sharded(
             p, us, pinv, width
         )
         local_pressure.array.grid = p.grid
         local_u_projected[0].array.grid = us[0].grid
         local_u_projected[1].array.grid = us[1].grid
-        return local_pressure, local_u_projected, t + dt
+
+        return local_pressure, local_u_projected, (force[0].data, force[1].data), t + dt
 
     return step_fn
 
 
 def evolve_navier_stokes_sharded(
-    pressure,
-    velocities,
-    laplacian_eigenvalues,
-    reference_time,
-    dt,
-    width,
-    inner_steps,
-    outer_steps,
-    obj_fn,
-    explicit_update_fn,
-    axis_names,
-    data_processing_inner=None,
-    data_processing_outer=None,
+    pressure: GridVariable,
+    velocities: tuple[GridVariable],
+    laplacian_eigenvalues: tuple[jax.Array],
+    reference_time: float,
+    dt: float,
+    width: int,
+    inner_steps: int,
+    outer_steps: int,
+    obj_fn: callable,
+    explicit_update_fn: callable,
+    axis_names: tuple[str],
+    data_processing_inner: Optional[callable] = None,
+    data_processing_outer: Optional[callable] = None,
 ):
     """
     Evolve `pressure` and velocities` using, the incompressible Navier Stokes equation.
@@ -337,20 +337,31 @@ def evolve_navier_stokes_sharded(
         Computes the local update of velocities coresponding to advection, diffusion and force-terms.
       axis_names: the names of the pmappe axes
       data_processing_inner: A function with signature
-        data_processing_int(tuple[GridVariable, tuple[GridVariable, GridVariable],float]) -> Any
+        data_processing_int(tuple[GridVariable, tuple[GridVariable, GridVariable], tuple[GridVariable, GridVariable],float]) -> Any
         The outpout of this function is accumulated using jax.lax.scan over the inner loop and
         passed into `data_processing_outer` during the outer loop. For `None`, defaults to `lambda *args: None`.
-        The input variables correspond to pressure, tuple of velocity-fields, and elapsed time, respectively.
+        The input variables correspond to
+          - pressure
+          - velocities
+          - IBM-force updates
+          - elapsed times
+        respectively.
         If this function is wrapped with shard_map, out_specs have to match the pytree structure of the return value
         of `evolve_navier_stokes_sharded`, which may depend on the pytree structure of the return values of
         `data_processing_inner`.
       data_processing_outer: A function with signature
-        data_processing_outer(tuple[GridVariable, tuple[GridVariable, GridVariable],float], Any) -> Any
+        data_processing_outer(tuple[GridVariable, tuple[GridVariable, GridVariable], tuple[GridVariable, GridVariable],float], Any) -> Any
         The output of the `data_processing_inner` is passed in as the second argument to `data_processing_outer`.
         The outpout of this function is accumulated using jax.lax.scan over the outer loop and returned
         to the caller. For `None`, defaults to `lambda *args: None`.
-        The input variables correspond to pressure, tuple of velocity-fields, and elapsed time, and output
-        variable of `data_processing_inner`, respectively.
+        The input corresponds to
+          (
+            - pressure
+            - velocities
+            - IBM-force updates
+            - elapsed times
+          )
+          - return values of `data_processing_inner`.
         If this function is wrapped with shard_map, out_specs have to match the pytree structure of the return value
         of `evolve_navier_stokes_sharded`, which may depend on the pytree structure of the return values of
         `data_processing_outer` and `data_processing_inner`.
@@ -362,7 +373,6 @@ def evolve_navier_stokes_sharded(
         For `data_processing_outer=None` equals `None`. The pytree structure of this output
         may depend on the pytree structure of the return values of `data_processing_inner` and
         `data_processing_outer`.
-
     """
 
     if data_processing_inner is None:
@@ -405,9 +415,10 @@ def evolve_navier_stokes_sharded(
         return result, data_processing_outer(result, y)
 
     # initial values for for_loop
-    init = (local_pressure, local_velocities, reference_time)
+    ibm_forces = tuple([jnp.zeros_like(v.data) for v in local_velocities])
+    init = (local_pressure, local_velocities, ibm_forces, reference_time)
     carry, y = jax.lax.scan(outer, init, xs=None, length=outer_steps)
-    final_pressure, final_velocities, _ = carry
+    final_pressure, final_velocities, _, _ = carry
 
     final_pressure.array.grid = pressure.grid
     final_velocities[0].array.grid = velocities[0].grid
