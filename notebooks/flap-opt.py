@@ -1,6 +1,6 @@
 import os
-import wandb
-wandb.init(project = 'aramco-jax-cfd')
+#import wandb
+
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax
@@ -128,36 +128,28 @@ def ellipse(geometry_params, ntheta=200):
     return jnp.append(xt, xt_2), jnp.append(yt, yt2)
 
 
-def initialize_params(A0, frequency, n_a, n_b, m_a, m_b):
+def initialize_params(n_a, n_b, m_a, m_b):
     alpha_com = jnp.zeros(n_a).at[0].set(0.8)
     beta_com = jnp.zeros(n_b)
-    alpha_rot = jnp.zeros(n_a).at[0].set(jnp.pi / 4.0)
+    alpha_rot = jnp.zeros(n_a).at[0].set(jnp.pi/4.0)
     beta_rot = jnp.zeros(m_b)
     return alpha_com, beta_com, alpha_rot, beta_rot, 0.0
 
 
-def to_motion_params(alpha_com, beta_com, alpha_rot, beta_rot, phi_rot):
-    phi_dis = 0.0
-    p_H = 1.0
-    p_p = 1.0
-    A0 = 2.0
-    frequency = 1.0
-    com_params = [
-        A0 / 2,
-        frequency,
-        phi_dis,
-        alpha_com * A0 / (4 * frequency),
-        beta_com * A0 / (2 * frequency),
-        p_H,
-    ]
-    rot_params = [0.0, frequency, phi_rot, alpha_rot, beta_rot, 1.0]
+def to_motion_params(ux, alpha_com, beta_com, alpha_rot, beta_rot, phi_rot):
+    phi_com = 0.0
+    theta_0 = 0.0
+    phi_theta = 1.0
+
+    com_params= [ux, phi_com,alpha_com,beta_com]
+    rot_params = [theta_0, phi_theta, alpha_rot,beta_rot]
     return com_params, rot_params
 
 
 def ellipse_trajectory(
-    ellipse_parameters, initial_center_of_mass_position, motion_params, npoints, t
+    ellipse_parameters, initial_center_of_mass_position, ux, motion_params, npoints, t
 ):
-    com_params, rot_params = to_motion_params(*motion_params)
+    com_params, rot_params = to_motion_params(ux, *motion_params)
     x, y = ellipse(ellipse_parameters, npoints)
     center_of_mass = initial_center_of_mass_position + com_motion(com_params, t)
     angular_rotation_speed = com_rotation(rot_params, t)
@@ -174,26 +166,27 @@ def ellipse_trajectory(
     return jnp.stack([xp, yp], axis=1)
 
 
-def com_motion(parameters, t):
-    alpha0, f, phi, alpha, beta, p = parameters
-    frequencies = jnp.array([jnp.arange(1, len(alpha) + 1)])
+def fourier_expansion(phi, alpha, beta, time):
+    frequencies = jnp.arange(1,len(alpha)+1, dtype=jnp.float64)
+    angles = 2*jnp.pi*time*frequencies + phi
+    return jnp.sum(alpha*jnp.sin(angles) + beta*jnp.cos(angles))
 
-    def alpha_1(time):
-        angle = jnp.add(2 * jnp.pi * time * frequencies * f, phi)
-        return jnp.sum(alpha * jnp.sin(angle) + beta * jnp.cos(angle))
-
-    return jnp.array([-alpha0 * t, alpha_1(t) - alpha_1(0)])
-
+def com_motion(parameters,t):
+    ux, phi, alpha, beta = parameters
+    y = partial(fourier_expansion, phi, alpha, beta)
+    return jnp.array([ux * t, y(t)- y(0.0)])
 
 def com_rotation(parameters, t):
-    a, b = com_motion(parameters, t)
-    return -a + b
+    theta_0, phi, alpha, beta = parameters
+    theta = partial(fourier_expansion, phi, alpha, beta)
+    return theta_0 + theta(t)
 
 
 def main(
     mesh: Mesh,
     density: float = 1,
     viscosity: float = 0.05,
+    ux: float = -1.0,
     dt: float = 1e-4,
     L1: float = 30.0,
     L2: float = 10.0,
@@ -214,6 +207,7 @@ def main(
       mesh: The device mesh
       density: Fluid density
       viscosity: Fluid viscosity
+      ux: speed of movement of ellipse in x direction
       dt: Time step
       L1: Domain size in x direction,
       L2:Domain size in y direction
@@ -314,7 +308,7 @@ def main(
         # ellipse_position(t) returns the surface points of the ellipse
         # at time t
         ellipse_position = partial(
-            ellipse_trajectory, *[ellipse_params, initial_com, params, npoints]
+            ellipse_trajectory, *[ellipse_params, initial_com, ux, params, npoints]
         )
         d_ellipse_position = jax.jacfwd(ellipse_position)
 
@@ -421,9 +415,8 @@ def main(
     n_b = 20
     m_a = 20
     m_b = 20
-    A0 = 2.0
-    frequency = 1.0
-    initial_motion_params = initialize_params(A0, frequency, n_a, n_b, m_a, m_b)
+
+    initial_motion_params = initialize_params(n_a, n_b, m_a, m_b)
     # lower and upper bounds of parameters
     lower = (
         np.concatenate([[0.25], np.full(n_a - 1, -0.8)]),
@@ -461,7 +454,7 @@ def main(
             value, grads = jgradloss(params)
             logs = to_log(params)
             logs.update({"objective": value})
-            wandb.log(logs, step=n)
+            #wandb.log(logs, step=n)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
             print(n, value)
@@ -498,10 +491,12 @@ if __name__ == "__main__":
     npoints = 100
     learning_rate = args.learning_rate
     maxiter = args.maxiter
+    #wandb.init(project = 'aramco-jax-cfd')
     optimal_params = main(
         mesh,
         density,
         viscosity,
+        -2.0,
         dt,
         L1,
         L2,
