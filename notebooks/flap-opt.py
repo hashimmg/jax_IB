@@ -1,8 +1,8 @@
 import os
-import wandb
-
+#import wandb
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ['XLA_PYTHON_CLIENT_ALLOCATOR']='platform'
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -276,7 +276,7 @@ def run_flow_around_cylinder(
 
     """
     config.disable_gradient_checkpoint()
-    wandb.init(project = 'aramco-jax-cfd-forward')
+    #wandb.init(project = 'aramco-jax-cfd-forward')
     domain = ((0.0, L1), (0.0, L2))
 
     dtype = jnp.float64
@@ -432,7 +432,7 @@ def run_opt(
     Returns:
       Any: The loss, or the optimal parameters
     """
-    wandb.init(project = 'aramco-jax-cfd-opt')
+    #wandb.init(project = 'aramco-jax-cfd-opt')
     domain = ((0.0, L1), (0.0, L2))
 
     dtype = jnp.float64
@@ -637,7 +637,7 @@ def run_opt(
             value, grads = jgradloss(params)
             logs = to_log(params)
             logs.update({"objective": value})
-            wandb.log(logs, step=n)
+            #wandb.log(logs, step=n)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
             print(n, value)
