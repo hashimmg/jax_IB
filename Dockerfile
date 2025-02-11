@@ -2,10 +2,6 @@ FROM nvidia/cuda:12.6.1-base-ubuntu24.04
 
 WORKDIR /tmp/
 RUN apt-get update && apt-get install -y curl gpg wget bzip2 git build-essential
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && dpkg -i cuda-keyring_1.1-1_all.deb && apt-get update && apt-get -y install cuda-toolkit-12-5
-RUN apt-get install -y nvidia-driver-555-open
-RUN apt-get install -y cuda-drivers-555
-
 RUN mkdir /scratch
 RUN mkdir -p /scratch/jax_ib/jax_ib
 RUN mkdir -p /scratch/jax_ib/scripts

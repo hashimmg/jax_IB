@@ -2,7 +2,6 @@ import os
 #import wandb
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ['XLA_PYTHON_CLIENT_ALLOCATOR']='platform'
 import jax
 
 jax.config.update("jax_enable_x64", True)
