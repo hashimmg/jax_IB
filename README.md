@@ -1,3 +1,7 @@
+Copyright © 2025 SB Technology, Inc. (SandboxAQ). All Rights Reserved.
+This software and its associated documentation are the confidential and proprietary property of SandboxAQ (“Company”) and are provided subject to the terms, conditions, and restrictions of the license agreement between the recipient and the Company. Any use, reproduction, modification, or distribution of this software outside the scope of the license agreement is strictly prohibited.
+THIS SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COMPANY BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 # jax_ib
 Immersed Boundary implementation in jax-cfd library
 
