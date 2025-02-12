@@ -1,4 +1,4 @@
-experiment: forward-simulation
+experiment: forward
 outer_steps: 2
 inner_steps: 2
 L1: 10.0
