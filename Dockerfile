@@ -27,6 +27,6 @@ COPY notebooks/config.yml /scratch/jax_ib/scripts/config.yml
 COPY entrypoint.sh /tmp/entrypoint.sh
 RUN chmod +x /tmp/entrypoint.sh
 WORKDIR /scratch/jax_ib/scripts
-
+ENTRYPOINT ["/bin/bash","-l","/tmp/entrypoint.sh"]
 
 

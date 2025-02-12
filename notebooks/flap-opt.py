@@ -145,6 +145,14 @@ def get_parser() -> argparse.ArgumentParser:
         help="Radius of the ellipse",
     )
 
+    parser.add_argument(
+        "--path",
+        type=str,
+        default="",
+        help="path for storing results",
+    )
+
+
     return parser
 
 
@@ -254,6 +262,7 @@ def run_flow_around_cylinder(
     outer_steps: int = 10,
     npoints: int = 100,
     radius: float = 1.0
+    path: str="",
 ):
     """
     Forward simulation of flow around a cylinder.
@@ -371,7 +380,7 @@ def run_flow_around_cylinder(
         lambda args, _: (args[0], args[1], args[3]),
     )
 
-    with open('cylinder_trajectory.pkl', 'wb') as f:
+    with open(ps.path.join(path,"cylinder_trajectory.pkl"), 'wb') as f:
       pickle.dump({'final_pressure':np.array(final_pressure.data),
                    'final_velocity':(
                      np.array(final_velocity[0].data),
@@ -403,6 +412,7 @@ def run_opt(
     B: int=1.0,
     learning_rate: float = 1e-1,
     maxiter: int = 100,
+    path: str="",
 ):
     """
     Run an example parameter optimization.
@@ -641,7 +651,7 @@ def run_opt(
             params = optax.apply_updates(params, updates)
             print(n, value)
 
-        with open("optimal-params.pkl", "wb") as f:
+        with open(os.path.join(path, "optimal-params.pkl"), "wb") as f:
           pickle.dump(params, f)
         print(params)
         return params
@@ -652,7 +662,7 @@ def run_opt(
             jgradloss, projection_box, value_and_grad=True, maxiter=maxiter
         )
         params = solver.run(initial_motion_params, hyperparams_proj=(lower, upper)).params
-        with open("optimal-params.pkl", "wb") as f:
+        with open(os.path.join(path, "optimal-params.pkl"), "wb") as f:
           pickle.dump(params, f)
         print(params)
         return params
@@ -687,6 +697,7 @@ if __name__ == "__main__":
         M=args.M,
         learning_rate=args.learning_rate,
         maxiter=args.maxiter,
+        path=args.path,
       )
     elif args.experiment=='forward-simulation':
       run_flow_around_cylinder(
@@ -704,4 +715,5 @@ if __name__ == "__main__":
         outer_steps=args.outer_steps,
         npoints=100,
         radius = args.radius
+        path=args.path,
       )
