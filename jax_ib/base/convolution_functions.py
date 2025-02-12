@@ -52,6 +52,7 @@ def mesh_convolve(
         jax.lax.psum(local_conv, axis_name=axis_names[0]), axis_name=axis_names[1]
     )
 
+
 def _sequential_conv(
     field: GridVariable, x: jax.Array, dirac_delta_approx: callable
 ) -> jax.Array:

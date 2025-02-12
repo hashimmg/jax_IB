@@ -22,5 +22,5 @@ setuptools.setup(
     },
     url='https://github.com/hashimmg/jax_IB',
     packages=setuptools.find_packages(),
-    python_requires='>=3',
+    python_requires='>=3.12',
 )

@@ -1,0 +1,13 @@
+name: jax-cfd
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.12
+  - jaxopt
+  - jsonargparse
+  - pip:
+      - -e /tmp/jax_ib
+      - https://github.com/jax-md/jax-md/archive/main.zip
+      - "jax[cuda12]==0.4.35"
+
