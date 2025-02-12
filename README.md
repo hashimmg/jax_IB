@@ -65,7 +65,7 @@ inside the container` to which the results will be stored:
 ```bash
 docker run --gpus all --shm-size=256GB -v local-dir:<container-dir> -it jax-cfd --path <container-dir> --N1 128 --N2 128 # more parameters can be passed
 ```
-The default value for `--path` used by the entrypoint is `/out-path`.
+The default value for `--path` used by the entrypoint is `<container-dir> = /out-path`.
 The user can run
 ```bash
 docker run --gpus all --shm-size=2GB -v local-dir:<container-dir> -it jax-cfd --help
