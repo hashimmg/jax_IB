@@ -43,7 +43,7 @@ python flap-opt.py --help
 for more information regarding parameter settings. Parameters can be modified through command line,
 or by passing in a yml file (see script/config.yml for an example), i.e.
 ```bash
-python flap-opt.py --config config.yml --N1 128 --N2 128
+python flap-opt.py --config config.yml --experiment forward --N1 128 --N2 128
 ```
 In this case the value for `N1` and `N2` in the `config.yml` fle will be overriden be the values passed
 in through the command line.

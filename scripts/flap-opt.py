@@ -50,7 +50,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--experiment",
         type=str,
-        choices=["optimize", "forward-simulation"],
+        choices=["optimize", "forward"],
         help="type of experiment",
     )
 
@@ -699,7 +699,7 @@ if __name__ == "__main__":
         maxiter=args.maxiter,
         path=args.path,
       )
-    elif args.experiment=='forward-simulation':
+    elif args.experiment=='forward':
       run_flow_around_cylinder(
         mesh=mesh,
         density=1.0,
