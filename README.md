@@ -8,51 +8,80 @@ Immersed Boundary implementation in jax-cfd library
 
 ## Overview
 
-This repository contains an implementation of an immersed boundary method in jax-cfd package. The immersed boundary method is a numerical technique used to simulate the interaction between fluid flow and immersed objects, such as particles, structures, or boundaries.
+This repository contains an implementation of an immersed boundary method in jax-cfd package.The immersed boundary method is a numerical technique used to simulate the interaction between fluid flow and immersed objects, such as particles, structures, or boundaries.
 
 ## Features
 
-- Simulates transport of multiple rigid bodies 
-- Combines Brownian dynamics integration with CFD for passive particle transport simulations
+- Simulates transport of multiple rigid bodies
 
 ## Installation
 
-To use a local version of the code, follow these steps:
+This code requires the GPU-aware jax release `"jax[cuda12]==0.4.35"`. Later release might work, but have not been tested.
+We recommend installation using the `conda`, `mamba` or `micromamba` service through the provided `environment.yml` file
+in this repo. From the root directory of jax_ib, run
 
-1. Clone the repository to your local machine:
+```bash
+micromamba create -n jax-cfd --file environment.yml
+micromamba activate jax-cfd
+pip install -e .
+python scripts/flap-opt.py --config scripts/config.yml
+```
 
-    ```bash
-    git clone https://github.com/hashimmg/jax_ib.git
-    ```
+## Usage
+The main script is located in `scripts/flap-opt.py`. Ths script implements two examples:
+1. forward simulation of a moving cylinder
+2. optimizing swimming efficiency of an ellipse
+Both examples are currently limited to 2d and periodic boundary conditions.
 
-2. Navigate to the project directory:
+The code implements a 2d domain decomposition to parallelize the simulation. The simulation is
+mapped accross a 2d grid of devices using `jax.lax` collectives and `jax`'s `shard_map` API.
 
-    ```bash
-    cd jax_ib
-    ```
+Run
+```bash
+python flap-opt.py --help
+```
+for more information regarding parameter settings. Parameters can be modified through command line,
+or by passing in a yml file (see script/config.yml for an example), i.e.
+```bash
+python flap-opt.py --config config.yml --N1 128 --N2 128
+```
+In this case the value for `N1` and `N2` in the `config.yml` fle will be overriden be the values passed
+in through the command line.
 
-3. ```bash
-   pip install -e .
-   ```
-   
-### Example
 
-The repository contains two examples:
+## Docker
 
-- [Flapping of an ellipse airfoil](https://github.com/hashimmg/jax_ib/blob/main/jax_ib/notebooks/Flapping_Demo.ipynb)
-- [Mixing in Journal bearing](https://github.com/hashimmg/jax_ib/blob/main/jax_ib/notebooks/journal_bearing_demo.ipynb)
-- [Taylor Dispersion](https://github.com/hashimmg/jax_ib/blob/main/jax_ib/notebooks/taylor_dispersion_demo.ipynb)
+This repository ships with a Dockerfile which can be used for containerization of the application.
+To build the container run
+```bash
+docker build -t jax-cfd .
+```
 
-### Other Packages Used
-This project relies on the following external packages:
+The container entrypoint is a shell script calling `scripts/flap-opt.py` with the default
+configuration `scripts/config.yml` inside the container. The user can pass additional parameters
+to the container which will override defaults in `config.yml`. To store results to disk the user
+can mount a local directory `local-dir` to the container (accessed as a user-defined name`<container-dir>`
+inside the container` to which the results will be stored:
+```bash
+docker run --gpus all --shm-size=256GB -v local-dir:container-dir -it jax-cfd --path container-dir --N1 128 --N2 128 # more parameters can be passed
+```
+The default value for `--path` used by the entrypoint is `/out-path`.
+The user can run
+```bash
+docker run --gpus all --shm-size=2GB -v local-dir:container-dir -it jax-cfd --help
+```
+to print a list of parameters with their default values.
 
-jax-cfd, jax-md
+Note the flags `--gpus` and `--shm-size` in the `docker run` call. The first one exposes the available GPUs to the container, while
+the second increases the size of `/dev/shm` from a default of 64MB to 2GB. Too small sizes of `/dev/shm` can result in core dumps
+of the application.
 
-Citing External Packages
+
+## Citing External Packages
 If you use this code in your research, please ensure to cite the relevant works. Here are the citations for the packages used in this project:
 
 Package 1: jax-cfd
-```bash 
+```bash
 @article{Kochkov2021-ML-CFD,
   author = {Kochkov, Dmitrii and Smith, Jamie A. and Alieva, Ayya and Wang, Qing and Brenner, Michael P. and Hoyer, Stephan},
   title = {Machine learning{\textendash}accelerated computational fluid dynamics},
@@ -69,7 +98,7 @@ Package 1: jax-cfd
 }
 ```
 Package 2: jax-md
-```bash 
+```bash
 @inproceedings{jaxmd2020,
  author = {Schoenholz, Samuel S. and Cubuk, Ekin D.},
  booktitle = {Advances in Neural Information Processing Systems},

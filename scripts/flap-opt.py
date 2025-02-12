@@ -57,21 +57,21 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--outer-steps",
         type=int,
-        default=10,
+        default=2,
         help="Number of outer evolution steps",
     )
 
     parser.add_argument(
         "--inner-steps",
         type=int,
-        default=10,
+        default=2,
         help="Number of inner evolution steps",
     )
 
     parser.add_argument(
         "--L1",
         type=float,
-        default=30.0,
+        default=10.0,
         help="Extension of the spatial domain in x direction",
     )
 
@@ -92,14 +92,14 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--N1",
         type=int,
-        default=128,
+        default=32,
         help="Gridshape in x direction",
     )
 
     parser.add_argument(
         "--N2",
         type=int,
-        default=128,
+        default=32,
         help="Gridshape in y direction",
     )
 
@@ -112,7 +112,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--maxiter",
         type=int,
-        default=100,
+        default=10,
     )
 
     parser.add_argument(
@@ -124,7 +124,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dt",
         type=float,
-        default=4e-5,
+        default=1e-5,
     )
 
     parser.add_argument(
@@ -261,7 +261,7 @@ def run_flow_around_cylinder(
     inner_steps: int = 10,
     outer_steps: int = 10,
     npoints: int = 100,
-    radius: float = 1.0
+    radius: float = 1.0,
     path: str="",
 ):
     """
@@ -380,7 +380,7 @@ def run_flow_around_cylinder(
         lambda args, _: (args[0], args[1], args[3]),
     )
 
-    with open(ps.path.join(path,"cylinder_trajectory.pkl"), 'wb') as f:
+    with open(os.path.join(path,"cylinder_trajectory.pkl"), 'wb') as f:
       pickle.dump({'final_pressure':np.array(final_pressure.data),
                    'final_velocity':(
                      np.array(final_velocity[0].data),
@@ -714,6 +714,6 @@ if __name__ == "__main__":
         inner_steps=args.inner_steps,
         outer_steps=args.outer_steps,
         npoints=100,
-        radius = args.radius
+        radius = args.radius,
         path=args.path,
       )
