@@ -63,7 +63,7 @@ to the container which will override defaults in `config.yml`. To store results 
 can mount a local directory `local-dir` to the container (accessed as a user-defined name`<container-dir>`
 inside the container` to which the results will be stored:
 ```bash
-docker run --gpus all --shm-size=256GB -v local-dir:<container-dir> -it jax-cfd --path container-dir --N1 128 --N2 128 # more parameters can be passed
+docker run --gpus all --shm-size=256GB -v local-dir:<container-dir> -it jax-cfd --path <container-dir> --N1 128 --N2 128 # more parameters can be passed
 ```
 The default value for `--path` used by the entrypoint is `/out-path`.
 The user can run
