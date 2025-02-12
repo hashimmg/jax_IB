@@ -48,7 +48,7 @@ def get_parser() -> argparse.ArgumentParser:
         "(if present in config file).",
     )
     parser.add_argument(
-        "experiment",
+        "--experiment",
         type=str,
         choices=["optimize", "forward-simulation"],
         help="type of experiment",
