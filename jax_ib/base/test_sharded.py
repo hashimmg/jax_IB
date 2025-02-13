@@ -623,6 +623,9 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
             ),
             out_specs=(
                 P("i", "j"),
@@ -630,7 +633,7 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
                 (P(None, "i", "j"), (P(None, "i", "j"), P(None, "i", "j")), P()),
             ),
         ),
-        static_argnums=(4, 5, 6, 7, 8, 9, 10, 11, 12),
+        static_argnums=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
     )
     ref_time = 0.0
     p, v, y = evolve(
@@ -647,6 +650,9 @@ def test_integration(mesh, N, inner_steps, outer_steps, obj_fn, vmapped):
         ("i", "j"),
         None,
         lambda args, y: args,
+        False,
+        False,
+        False,
     )
 
     def internal_post_processing(all_variables, dt):

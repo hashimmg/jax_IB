@@ -412,7 +412,7 @@ def evolve_navier_stokes_sharded(
         return carry, y
 
     # outer loop running over `outer_steps`
-    @partial(checkpoint,checkpointing=outer_checkpointing)
+    @partial(checkpoint, checkpointing=outer_checkpointing)
     def outer(carry, x):
         result, y = inner(carry)
         return result, data_processing_outer(result, y)
