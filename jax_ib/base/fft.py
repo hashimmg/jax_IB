@@ -208,7 +208,7 @@ def _ifft1d_j(array: jax.Array, axis_name: str) -> jax.Array:
     return _get_fft_j(axis_name, BWD)(array)
 
 
-@partial(checkpoint, static_argnums=(1, 2))
+#@partial(checkpoint, static_argnums=(1, 2))
 def fft(array: jax.Array, axis: int, axis_name: str):
     """
     Compute the 1d-FFT of a 2d-array `array` along axis `axis` with name `axis_name`
@@ -239,7 +239,7 @@ def fft(array: jax.Array, axis: int, axis_name: str):
         raise ValueError(f"axis {axis} not supported")
 
 
-@partial(checkpoint, static_argnums=(1, 2))
+#@partial(checkpoint, static_argnums=(1, 2))
 def ifft(array: jax.Array, axis: int, axis_name: str):
     """
     Compute the inverse 1d-FFT of a 2d-array `array` along axis `axis` with name `axis_name`
@@ -270,7 +270,7 @@ def ifft(array: jax.Array, axis: int, axis_name: str):
         raise ValueError(f"axis {axis} not supported")
 
 
-@partial(checkpoint, static_argnums=1)
+#@partial(checkpoint, static_argnums=1)
 def fft_2d(array, axis_names):
     """
     Compute the 2d-FFT of a 2d-array `array`.
@@ -296,7 +296,7 @@ def fft_2d(array, axis_names):
     return _fft1d_i(_fft1d_j(array, axis_names[1]), axis_names[0])
 
 
-@partial(checkpoint, static_argnums=1)
+#@partial(checkpoint, static_argnums=1)
 def ifft_2d(array, axis_names):
     """
     Compute the inverse 2d-FFT of a 2d-array `array`.

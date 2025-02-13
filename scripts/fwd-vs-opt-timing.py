@@ -32,6 +32,7 @@ from jaxopt.projection import projection_box
 import numpy as np
 import pickle
 import jsonargparse as argparse
+import time
 
 GridVariable = grids.GridVariable
 
@@ -46,18 +47,6 @@ def get_parser() -> argparse.ArgumentParser:
         "config file (if present in config). All arguments passed after "
         "config file will override any values in config file "
         "(if present in config file).",
-    )
-    parser.add_argument(
-        "--experiment",
-        type=str,
-        choices=["optimize", "forward"],
-        help="type of experiment",
-    )
-
-    parser.add_argument(
-      "--mesh",
-      type=str,
-      default='2,2'
     )
 
     parser.add_argument(
@@ -87,14 +76,11 @@ def get_parser() -> argparse.ArgumentParser:
         default=10.0,
         help="Extension of the spatial domain in x direction",
     )
-
     parser.add_argument(
-        "--ux",
-        type=float,
-        default=-1.0,
-        help="Speed of movement of the object in x direction",
+      "--meshes",
+      type=str,
+      nargs='+',
     )
-
     parser.add_argument(
         "--N1",
         type=int,
@@ -110,24 +96,6 @@ def get_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--opt-type",
-        type=str,
-        default=None,
-    )
-
-    parser.add_argument(
-        "--maxiter",
-        type=int,
-        default=10,
-    )
-
-    parser.add_argument(
-        "--learning-rate",
-        type=float,
-        default=1e-1,
-    )
-
-    parser.add_argument(
         "--dt",
         type=float,
         default=1e-5,
@@ -138,17 +106,32 @@ def get_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.003,
     )
+
+    parser.add_argument(
+        "--grad-type",
+        type=str,
+        default='jacfwd'
+    )
+
     parser.add_argument(
         "--M",
         type=int,
         default=2,
     )
-
     parser.add_argument(
-        "--radius",
-        type=float,
-        default=1.0,
-        help="Radius of the ellipse",
+        "--stepfn-cp",
+        type=bool,
+        default=True,
+    )
+    parser.add_argument(
+        "--inner-cp",
+        type=bool,
+        default=False,
+    )
+    parser.add_argument(
+        "--outer-cp",
+        type=bool,
+        default=False,
     )
 
     parser.add_argument(
@@ -235,9 +218,9 @@ def ellipse_at_constant_speed(
     return jnp.stack([xp, yp], axis=1)
 
 
-def fourier_expansion(phi, alpha, beta, time):
+def fourier_expansion(phi, alpha, beta, t):
     frequencies = jnp.arange(1,len(alpha)+1, dtype=jnp.float64)
-    angles = 2*jnp.pi*time*frequencies + phi
+    angles = 2*jnp.pi*t*frequencies + phi
     return jnp.sum(alpha*jnp.sin(angles) + beta*jnp.cos(angles))
 
 
@@ -253,7 +236,7 @@ def com_rotation(parameters, t):
     return theta_0 + theta(t)
 
 
-def run_flow_around_cylinder(
+def main(
     mesh: Mesh,
     density: float = 1.0,
     viscosity: float = 0.05,
@@ -267,158 +250,13 @@ def run_flow_around_cylinder(
     inner_steps: int = 10,
     outer_steps: int = 10,
     npoints: int = 100,
-    radius: float = 1.0,
-    path: str="",
-):
-    """
-    Forward simulation of flow around a cylinder.
-
-    Args:
-      mesh: The device mesh
-      density: Fluid density
-      viscosity: Fluid viscosity
-      ux: speed of movement of ellipse in x direction
-      dt: Time step
-      L1: Domain size in x direction,
-      L2:Domain size in y direction
-      N1: Grid shape in x direction
-      N2: Grid shape in y direction
-      ref_time: Reference time
-      inner_steps: Inner time steps
-      outer_steps: Outer time steps
-      radius: Cylinder radius.
-
-    """
-    config.disable_gradient_checkpoint()
-    #wandb.init(project = 'aramco-jax-cfd-forward')
-    domain = ((0.0, L1), (0.0, L2))
-
-    dtype = jnp.float64
-    grid = grids.Grid(
-        (N1, N2), domain=domain, device_mesh=mesh, periods=(L1, L2), dtype=dtype
-    )
-
-    # initial center of mass of the ellipse and principal axes
-    initial_com = jnp.array([domain[0][1] * 0.8, domain[1][1] * 0.5])
-    circle_params = jnp.array([radius, radius])
-
-    # initialize the pressure and velocities on each device
-    dist_initialize = shard_map(
-        shard_utils.dist_initialize,
-        mesh=mesh,
-        in_specs=(P("i", "j"), None),
-        out_specs=(P("i", "j"), (P("i", "j"), P("i", "j"))),
-    )
-
-    # these are sharded now across the available devices
-    global_pressure, global_velocities = dist_initialize(
-        np.arange(8).reshape(4, 2), grid
-    )
-
-    surface_velocity = lambda f, x: convolution_functions.mesh_convolve(
-        f, x, convolution_functions.gaussian, axis_names=("i", "j"), vmapped=False
-    )
-
-    # eigenvalues of the 1d laplacians (each spatial direction)
-    # required for pseudo inversion of pressure correction
-    eigvals = tuple(
-        [
-            np.fft.fft(array_utils.laplacian_column(size, step))
-            for size, step in zip(grid.shape, grid.step)
-        ]
-    )
-
-    # map the evolution function across the device mesh
-    evolve = shard_map(
-        time_stepping.evolve_navier_stokes_sharded,
-        mesh=mesh,
-        in_specs=(
-            P("i", "j"),
-            (P("i", "j"), P("i", "j")),
-            (P("i"), P("j")),
-            P(),
-            P(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        out_specs=(P("i", "j"), (P("i", "j"), P("i", "j")), (P(None, 'i','j'),(P(None,"i", "j"), P(None,"i", "j")), P())),
-        check_rep=False,
-    )
-
-    # use upwind interpolation for convection contribution
-    def convect(v):
-        return tuple(advection.advect_upwind(u, v, dt) for u in v)
-
-    # function for computing explicit update steps of velocities
-    explicit_update = equations.navier_stokes_explicit_terms(
-        density=density,
-        viscosity=viscosity,
-        dt=dt,
-        convect=convect,
-        diffuse=diffusion.diffuse,
-        forcing=None,
-    )
-    # circle_position(t) returns the surface points of the cylinder
-    # at time t
-    circle_position= partial(
-      ellipse_at_constant_speed, *[circle_params, initial_com, ux, npoints]
-    )
-    jevolve = jax.jit(evolve, static_argnums = (4,5,6,7,8,9,10,11,12))
-    final_pressure, final_velocity, trajectory = jevolve(
-        global_pressure,
-        global_velocities,
-        eigvals,
-        ref_time,
-        dt,
-        1,
-        inner_steps,
-        outer_steps,
-        circle_position,
-        explicit_update,
-        ("i", "j"),
-        None,
-        lambda args, _: (args[0], args[1], args[3]),
-    )
-
-    with open(os.path.join(path,"cylinder_trajectory.pkl"), 'wb') as f:
-      pickle.dump({'final_pressure':np.array(final_pressure.data),
-                   'final_velocity':(
-                     np.array(final_velocity[0].data),
-                     np.array(final_velocity[1].data)
-                   ),
-                   'trajectory':(np.array(trajectory[0].data),
-                                 (np.array(trajectory[1][0].data), np.array(trajectory[1][1].data)),
-                                 np.array(trajectory[2]))},
-                  f)
-
-
-def run_opt(
-    mesh: Mesh,
-    density: float = 1.0,
-    viscosity: float = 0.05,
-    ux: float = -1.0,
-    dt: float = 1e-5,
-    L1: float = 30.0,
-    L2: float = 10.0,
-    N1: int = 128,
-    N2: int = 128,
-    ref_time: float = 0.0,
-    inner_steps: int = 10,
-    outer_steps: int = 10,
-    npoints: int = 100,
-    opt_type: str = "optax",
     M: int = 4,
     A: int=0.5,
     B: int=1.0,
-    learning_rate: float = 1e-1,
-    maxiter: int = 100,
-    path: str="",
+    stepfn_cp=True,
+    inner_cp=False,
+    outer_cp=False,
+    grad_type='jacfwd',
 ):
     """
     Run an example parameter optimization.
@@ -436,13 +274,9 @@ def run_opt(
       ref_time: Reference time
       inner_steps: Inner time steps
       outer_steps: Outer time steps
-      opt_type: which opt_type to use, either optax or jaxopt.
-        if neither, the loss at the initial parameter values is returned.
       M: Number of motion parameters for center-of-mass motion and rotation,
         respectively, see optimal swimmer chapter in https://arxiv.org/abs/2403.06257
       A, B: the two axes of the ellipse.
-      learning_rate: the adam learning rate
-      maxiter: Maximum number of iterations.
 
     Returns:
       Any: The loss, or the optimal parameters
@@ -495,6 +329,9 @@ def run_opt(
             (P("i"), P("j")),
             P(),
             P(),
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -567,26 +404,23 @@ def run_opt(
             lifting and rotating the ellipse.
 
             """
-            pressure, _, force, time = args
-            x = ellipse_position(time)
+            pressure, _, force, t = args
+            x = ellipse_position(t)
             delta = pressure.grid.step
             fx, fy = tuple(
               [
                 jax.lax.psum(
                   jax.lax.psum(
-                    jnp.sum(f)*delta[0] * delta[1]
-                  ),
-                  axis_name="i",
-                ),
-                axis_name="j",
-              )
-              for f in force
-            ]
+                    jnp.sum(f)*delta[0] * delta[1],
+                    axis_name="i"),
+                  axis_name="j")
+                for f in force
+              ]
             )
-            Ux, Uy = jnp.mean(d_ellipse_position(time), axis=0)
+            Ux, Uy = jnp.mean(d_ellipse_position(t), axis=0)
             return (
                 fx * Ux * dt * inner_steps,
-                (fy * Uy + rotation_power(time)) * dt * inner_steps,
+                (fy * Uy + rotation_power(t)) * dt * inner_steps,
             )
 
         # `y` contains the stacked outputs of `compute_drag` above.
@@ -604,6 +438,9 @@ def run_opt(
             ("i", "j"),
             None,
             compute_drag,
+            stepfn_cp,
+            inner_cp,
+            outer_cp,
         )
         # compute the ration of total energy of movement in x direction
         # vs total energy of lifting and rotating the object (ellipse).
@@ -612,85 +449,54 @@ def run_opt(
 
     initial_motion_params = initialize_params(M, M,M,M)
     # lower and upper bounds of parameters
+    jloss = jax.jit(loss)
+    if grad_type == "value_and_grad":
+      jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
+    elif grad_type == "grad":
+      jgradloss = jax.jit(jax.grad(loss, argnums=0))
+    elif grad_type == "jacrev":
+      jgradloss = jax.jit(jax.jacrev(loss, argnums=0))
+    elif grad_type == "jacfwd":
+      jgradloss = jax.jit(jax.jacfwd(loss, argnums=0))
 
-    lower = (
-        np.concatenate([[0.25], np.full(M - 1, -0.8)]),
-        np.full(M, -0.8),
-        np.full(M, -jnp.pi / 4),
-        np.full(M, -jnp.pi / 4),
-        -jnp.pi / 2,
-    )
-    upper = (
-        np.full(M, 0.8),
-        np.full(M, 0.8),
-        np.full(M, jnp.pi / 4),
-        np.full(M, jnp.pi / 4),
-        jnp.pi / 2,
-    )
 
-    def to_log(params):
-        logs = {}
-        K = 0
-        for p in params:
-            if hasattr(p, "__iter__") and len(p.shape) > 0:
-                logs.update({f"param-{i+K}": o for i, o in enumerate(p)})
-                K += len(p)
-            else:
-                logs.update({f"param-{K}": p})
-                K += 1
-        return logs
+    jgradloss(initial_motion_params)
+    res = jloss(initial_motion_params)
+    print(res)
 
-    if opt_type and opt_type.lower() == "optax":
-        jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
-        optimizer = optax.adam(learning_rate)
-        params = initial_motion_params
-        opt_state = optimizer.init(params)
-        for n in range(maxiter):
-            value, grads = jgradloss(params)
-            logs = to_log(params)
-            logs.update({"objective": value})
-            #wandb.log(logs, step=n)
-            updates, opt_state = optimizer.update(grads, opt_state)
-            params = optax.apply_updates(params, updates)
-            print(n, value)
 
-        with open(os.path.join(path, "optimal-params.pkl"), "wb") as f:
-          pickle.dump(params, f)
-        print(params)
-        return params
+    t1 = time.time()
+    res=jloss(initial_motion_params)
+    res.block_until_ready()
+    loss_time = time.time() - t1
 
-    elif opt_type and opt_type.lower() == "jaxopt":
-        jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
-        solver = ProjectedGradient(
-            jgradloss, projection_box, value_and_grad=True, maxiter=maxiter
-        )
-        params = solver.run(initial_motion_params, hyperparams_proj=(lower, upper)).params
-        with open(os.path.join(path, "optimal-params.pkl"), "wb") as f:
-          pickle.dump(params, f)
-        print(params)
-        return params
-    jgradloss = jax.jit(jax.value_and_grad(loss, argnums=0))
-    val, grad = jgradloss(initial_motion_params)
-    print(val)
+    t1 = time.time()
+    res = jgradloss(initial_motion_params)
+    res[0].block_until_ready()
+    grad_time = time.time() - t1
+
+    return loss_time, grad_time
 
 
 if __name__ == "__main__":
 
     parser = get_parser()
     args = parser.parse_args()
-    if args.path and (not os.path.exists(args.path)):
-      os.mkdir(args.path)
+    path = f"{args.path}-{args.grad_type}"
+    if not os.path.exists(path):
+      os.mkdir(path)
 
-    parser.save(args, os.path.join(args.path, 'config.yml'))
+    parser.save(args, os.path.join(path, 'config.yml'))
+    meshes = [tuple(list(map(int, s.split(',')))) for s in args.meshes]
+    runtimes = {}
 
-    mesh_size = tuple(list(map(int, args.mesh.split(','))))
-    mesh = jax.make_mesh(axis_shapes=mesh_size, axis_names=("i", "j"))
-    if args.experiment=='optimize':
-      run_opt(
+    for mesh_size in meshes:
+      mesh = jax.make_mesh(axis_shapes=mesh_size, axis_names=("i", "j"))
+      loss_time, grad_time = main(
         mesh=mesh,
         density=1.0,
         viscosity=args.viscosity,
-        ux=args.ux,
+        ux=-1.0,
         dt=args.dt,
         L1=args.L1,
         L2=args.L2,
@@ -700,27 +506,15 @@ if __name__ == "__main__":
         inner_steps=args.inner_steps,
         outer_steps=args.outer_steps,
         npoints=100,
-        opt_type=args.opt_type,
         M=args.M,
-        learning_rate=args.learning_rate,
-        maxiter=args.maxiter,
-        path=args.path,
+        A = 0.5,
+        B = 1.0,
+        stepfn_cp = args.stepfn_cp,
+        inner_cp = args.inner_cp,
+        outer_cp = args.outer_cp,
+        grad_type=args.grad_type,
       )
-    elif args.experiment=='forward':
-      run_flow_around_cylinder(
-        mesh=mesh,
-        density=1.0,
-        viscosity=args.viscosity,
-        ux=args.ux,
-        dt=args.dt,
-        L1=args.L1,
-        L2=args.L2,
-        N1=args.N1,
-        N2=args.N2,
-        ref_time=0.0,
-        inner_steps=args.inner_steps,
-        outer_steps=args.outer_steps,
-        npoints=100,
-        radius = args.radius,
-        path=args.path,
-      )
+      runtimes[mesh_size] = {'loss':loss_time,
+                        'grad':grad_time}
+    with open(os.path.join(path, 'runtimes.pkl'),'wb') as f:
+        pickle.dump(runtimes, f)

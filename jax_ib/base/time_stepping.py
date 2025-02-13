@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Callable, Sequence, TypeVar
+from functools import partial
+from typing import Callable, Sequence, TypeVar, Optional
 import jax
 import jax.numpy as jnp
 import tree_math
@@ -13,10 +14,9 @@ from jax_ib.base import (
     convolution_functions,
     pressure as prs,
 )
-from jax_cfd.base import time_stepping
-from jax_ib.base import particle_class
+from jax_ib.base import time_stepping, config, particle_class
 from jax_ib.base.config import checkpoint
-from typing import Optional
+
 
 PyTreeState = TypeVar("PyTreeState")
 TimeStepFn = Callable[[PyTreeState], PyTreeState]
@@ -221,6 +221,7 @@ def get_step_fn_sharded(
     obj_fn: callable,
     explicit_update_fn: callable,
     axis_names: tuple[str],
+    enable_checkpointing: bool = True,
 ) -> callable:
     """
     Return the function that performes an update step of pressure and velocity
@@ -236,9 +237,8 @@ def get_step_fn_sharded(
       explicit_update_fn: A callable with signature
         `explicit_update_fn(tuple[GridVariable, GridVariable]) -> tuple[GridVariable, GridVariable]`.
         Computes the local update of velocities coresponding to advection, diffusion and force-terms.
-      surace_velocity_fn: A callable with signature
-        `surface_velocity_fn(field:GridVariable, x:jax.Array, y:jax.Array) -> jax.Array`.
-        Computes the values of its input `field` at the positions `x,y`.
+      axis_names: The names of the mapped axes
+      enable_checkpinting: If True, the step function is checkpointed at every step
 
     Returns:
       callable: The step function for a single update step. The signature of the this function is
@@ -254,7 +254,7 @@ def get_step_fn_sharded(
         f, x, convolution_functions.gaussian, axis_names=axis_names, vmapped=False
     )
 
-    @checkpoint
+    @partial(checkpoint, checkpointing=enable_checkpointing)
     def step_fn(
         args: tuple[GridVariable, tuple[GridVariable, GridVariable], float],
     ) -> tuple[GridVariable, tuple[GridVariable, GridVariable], float]:
@@ -315,6 +315,9 @@ def evolve_navier_stokes_sharded(
     axis_names: tuple[str],
     data_processing_inner: Optional[callable] = None,
     data_processing_outer: Optional[callable] = None,
+    stepfn_checkpointing: bool = False,
+    inner_checkpointing: bool = False,
+    outer_checkpointing: bool = True,
 ):
     """
     Evolve `pressure` and velocities` using, the incompressible Navier Stokes equation.
@@ -388,6 +391,7 @@ def evolve_navier_stokes_sharded(
         obj_fn,
         explicit_update_fn,
         axis_names,
+        stepfn_checkpointing,
     )
 
     i = jax.lax.axis_index("i")
@@ -397,19 +401,18 @@ def evolve_navier_stokes_sharded(
     local_pressure = pressure.to_subgrid((i, j))
     local_velocities = tuple([u.to_subgrid((i, j)) for u in velocities])
 
-    @checkpoint
     def _step_fun(carry, x):
         result = step_fun(carry)
         return result, data_processing_inner(result)
 
     # inner loop running over `inner_steps`
-    @checkpoint
+    @partial(checkpoint, checkpointing=inner_checkpointing)
     def inner(args):
         carry, y = jax.lax.scan(_step_fun, args, xs=None, length=inner_steps)
         return carry, y
 
     # outer loop running over `outer_steps`
-    @checkpoint
+    @partial(checkpoint,checkpointing=outer_checkpointing)
     def outer(carry, x):
         result, y = inner(carry)
         return result, data_processing_outer(result, y)

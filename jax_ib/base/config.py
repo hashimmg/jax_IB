@@ -6,7 +6,6 @@ import jax
 
 CHECKPOINT = True
 
-
 def enable_gradient_checkpoint():
     """
     Globally enable jax's gradient checkpointing.
@@ -26,12 +25,17 @@ def disable_gradient_checkpoint():
     CHECKPOINT = False
 
 
-def checkpoint(fun, *args, **kwargs):
+def checkpoint(fun, *args, checkpointing=None, **kwargs):
     """
     Simple wrapper around jax.checkpoint. Use this function instead of
     jax.checkpoint to globally enable or disable checkpointing of all
     wrapped functions.
     """
-    if CHECKPOINT:
+    if checkpointing is None:
+      checkpointing = CHECKPOINT
+    if not checkpointing:
+        return fun
+    elif checkpointing:
         return jax.checkpoint(fun, *args, **kwargs)
+
     return fun

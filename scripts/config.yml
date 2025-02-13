@@ -1,15 +1,17 @@
-experiment: forward
+experiment: optimize
+mesh: 2,2
 outer_steps: 2
 inner_steps: 2
 L1: 10.0
 L2: 10.0
 ux: -1.0
-N1: 32
-N2: 32
-opt_type: optax
+N1: 128
+N2: 128
+opt_type:
 maxiter: 10
 learning_rate: 0.1
 dt: 1.0e-05
 viscosity: 0.1
 M: 2
 radius: 1.0
+path: ''
